@@ -317,7 +317,7 @@ This work is licensed under [CC BY-NC 4.0](https://creativecommons.org/licenses/
 
 ## Roadmap
 
-- [ ] Section 11 A/B Protocol
+- [X] Section 11 A/B/C Protocol
 - [x] Dossier Template
 - [ ] CustomGPT implementation
 - [ ] Intervals.icu OAuth integration guide
