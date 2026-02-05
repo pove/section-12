@@ -1,3 +1,4 @@
+
 name: Auto-Sync Intervals.icu Data
 
 on:
@@ -102,17 +103,22 @@ jobs:
             git config --local user.email "github-actions[bot]@users.noreply.github.com"
             git config --local user.name "github-actions[bot]"
             
-            # Pull any changes from the sync step
-            git pull --rebase origin main
+            # Pull any changes from the sync step (autostash handles local changes)
+            git pull --rebase --autostash origin main
             
-            # Add and commit the archive file
+            # Add and commit the archive file and FTP history
             git add archive/
+            # Add ftp_history.json if it exists
+            if [ -f ftp_history.json ]; then
+              git add ftp_history.json
+              echo "✅ Added ftp_history.json to commit"
+            fi
             
             # Only commit if there are changes
             if ! git diff --staged --quiet; then
-              git commit -m "Archive training data snapshot - $(date -u +"%Y-%m-%d %H:%M:%S UTC")"
+              git commit -m "Archive training data + FTP history - $(date -u +"%Y-%m-%d %H:%M:%S UTC")"
               git push
-              echo "✅ Archive committed and pushed"
+              echo "✅ Archive and FTP history committed and pushed"
             else
               echo "⏭️  No new archive to commit"
             fi
