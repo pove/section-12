@@ -141,3 +141,36 @@ upper-body only. 🩹
 ```
 
 ---
+
+## Example 4: Rest Day (Active Recovery Walk)
+
+```
+Data (last_updated UTC: 2026-01-22T16:45:12)
+
+Rest day walk in the rain. Low intensity, full recovery zone.
+
+Completed workout: Walk Training Session
+Start time: 14:30:08
+Duration: 1.00 hours
+Distance: 5.1 km
+HR: 78 avg / 96 max
+HR zones: 100% Zone 1
+Calories: 210 kcal
+TSS: 6
+
+Weekly totals:
+Polarization: Z1+Z2 97%, Z3 0%, Z4+ 3%
+TSB: +0.85
+CTL: 73.10
+ATL: 72.25
+Ramp rate: -1.20
+ACWR: 0.82 (optimal)
+Hours: 15.50
+TSS: 498
+
+Overall:
+Easy recovery walk, entirely in Z1 as expected on a rest day. TSB positive at +0.85 —
+recovering well heading into tomorrow's interval session. Braved the rain at 4°C too. 🌧️
+```
+
+---
