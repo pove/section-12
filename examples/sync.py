@@ -1,3 +1,4 @@
+
 #!/usr/bin/env python3
 """
 Intervals.icu → GitHub/Local JSON Export
@@ -7,7 +8,7 @@ Supports both automated GitHub sync and manual local export.
 Version 3.2.0 - Smart ramp rate logic
   - Smart fitness metrics: CTL/ATL/TSB/ramp_rate all use API values when today's
     workouts are completed, decayed yesterday values when planned but not yet done
-  - Uses API data for eFTP, W', P-max, VO2max, Sleep Score (from wellness endpoint)
+  - Uses API data for eFTP, W', P-max, VO2max (from wellness endpoint)
   - Tracks indoor and outdoor FTP separately for Benchmark Index
   - Calculates ACWR, Monotony, Strain, Recovery Index locally
 """
@@ -60,7 +61,7 @@ class IntervalsSync:
         Fetch today's wellness data which contains:
         - CTL, ATL, rampRate (but these include planned workouts!)
         - sportInfo with eFTP, W', P-max (accurate live estimates)
-        - VO2max, sleepScore, etc.
+        - VO2max, sleep quality/hours, etc.
         """
         today = datetime.now().strftime("%Y-%m-%d")
         try:
@@ -287,7 +288,6 @@ class IntervalsSync:
         
         # Extract additional metrics from today's wellness
         vo2max = today_wellness.get("vo2max")
-        sleep_score = today_wellness.get("sleepScore")
         
         # Get API values for fitness metrics (these include planned workouts!)
         api_ctl = today_wellness.get("ctl")
@@ -384,8 +384,7 @@ class IntervalsSync:
             power_model=power_model,
             benchmark_indoor=(benchmark_index_indoor, ftp_8_weeks_ago_indoor, current_ftp_indoor),
             benchmark_outdoor=(benchmark_index_outdoor, ftp_8_weeks_ago_outdoor, current_ftp_outdoor),
-            vo2max=vo2max,
-            sleep_score=sleep_score
+            vo2max=vo2max
         )
         
         data = {
@@ -430,7 +429,8 @@ class IntervalsSync:
                     "weight_kg": latest_wellness.get("weight") or athlete.get("icu_weight"),
                     "resting_hr": latest_wellness.get("restingHR") or athlete.get("icu_resting_hr"),
                     "hrv": latest_wellness.get("hrv"),
-                    "sleep_score": sleep_score
+                    "sleep_quality": latest_wellness.get("sleepQuality"),
+                    "sleep_hours": round(latest_wellness.get("sleepSecs", 0) / 3600, 2) if latest_wellness.get("sleepSecs") else None
                 }
             },
             "derived_metrics": derived_metrics,
@@ -449,7 +449,7 @@ class IntervalsSync:
                                     power_model: Dict,
                                     benchmark_indoor: Tuple[Optional[float], Optional[int], Optional[int]],
                                     benchmark_outdoor: Tuple[Optional[float], Optional[int], Optional[int]],
-                                    vo2max: float, sleep_score: float) -> Dict:
+                                    vo2max: float) -> Dict:
         """
         Calculate Section 11 derived metrics.
         
@@ -651,7 +651,6 @@ class IntervalsSync:
             
             # Additional wellness metrics (from API)
             "vo2max": vo2max,
-            "sleep_score": sleep_score,
             
             # Validation metadata
             "calculation_timestamp": datetime.now().isoformat(),
@@ -1280,7 +1279,6 @@ def main():
         print(f"   W': {dm.get('w_prime_kj')}kJ")
         print(f"   P-max: {dm.get('p_max')}W")
         print(f"   VO2max: {dm.get('vo2max')}")
-        print(f"   Sleep Score: {dm.get('sleep_score')}")
         bi_indoor = dm.get('benchmark_indoor', {})
         bi_outdoor = dm.get('benchmark_outdoor', {})
         print(f"   Indoor FTP:  {bi_indoor.get('current_ftp')}W → Benchmark: {bi_indoor.get('benchmark_percentage') or 'N/A (need 8 weeks)'}")
@@ -1307,7 +1305,6 @@ def main():
         print(f"   W': {dm.get('w_prime_kj')}kJ")
         print(f"   P-max: {dm.get('p_max')}W")
         print(f"   VO2max: {dm.get('vo2max')}")
-        print(f"   Sleep Score: {dm.get('sleep_score')}")
         bi_indoor = dm.get('benchmark_indoor', {})
         bi_outdoor = dm.get('benchmark_outdoor', {})
         print(f"   Indoor FTP:  {bi_indoor.get('current_ftp')}W → Benchmark: {bi_indoor.get('benchmark_percentage') or 'N/A (need 8 weeks)'}")
