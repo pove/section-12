@@ -8,7 +8,9 @@ This guide explains how to create an automated JSON data mirror of your Interval
 
 The data mirror automatically syncs your Intervals.icu metrics to a GitHub repository every 15 minutes, producing a static JSON URL that AI systems can read.
 
-**Result:** `https://raw.githubusercontent.com/[you]/[repo]/main/latest.json`
+**Result:**
+- `https://raw.githubusercontent.com/[you]/[repo]/main/latest.json`
+- `https://raw.githubusercontent.com/[you]/[repo]/main/history.json`
 
 ---
 
@@ -49,7 +51,7 @@ Upload these files to your repository:
 |------|----------|-------------|
 | `sync.py` | Root | The sync script |
 | `auto-sync.yml` | `.github/workflows/` | GitHub Actions workflow |
-| `latest.json` | Root | Empty file: `{}` |
+| `DATA_REPO_README.md` | Root (rename to `README.md`) | README template with sync badge |
 
 **To create the workflow folder:**
 1. Click "Add file" → "Create new file"
@@ -90,9 +92,10 @@ Wait 30-60 seconds, then check if `latest.json` has been updated.
 Your data should now be accessible at:
 ```
 https://raw.githubusercontent.com/[your-username]/[repo-name]/main/latest.json
+https://raw.githubusercontent.com/[your-username]/[repo-name]/main/history.json
 ```
 
-Test it by opening that URL in your browser — you should see your training data as JSON.
+Test by opening the latest.json URL in your browser — you should see your training data as JSON. `history.json` is generated automatically on first run with tiered granularity: daily (90 days), weekly (180 days), and monthly (up to 3 years).
 
 ---
 
@@ -148,10 +151,13 @@ Benchmark Index = (Current FTP - FTP 8 weeks ago) / FTP 8 weeks ago
 
 Once set up, configure your AI platform using the instructions in the main [README](../README.md#quick-start).
 
-Your JSON URL:
+Your JSON URLs:
 ```
 https://raw.githubusercontent.com/[your-username]/[repo-name]/main/latest.json
+https://raw.githubusercontent.com/[your-username]/[repo-name]/main/history.json
 ```
+
+Provide both URLs to your AI coach — `latest.json` has the current 7-day snapshot and `history.json` provides longitudinal context for trend analysis.
 
 ---
 
@@ -161,9 +167,9 @@ https://raw.githubusercontent.com/[your-username]/[repo-name]/main/latest.json
 - Check secret names match exactly: `ATHLETE_ID`, `INTERVALS_KEY`
 - Secrets are case-sensitive
 
-### Workflow fails with "exit code 128"
-- This is a git conflict during archive creation
-- Update `auto-sync.yml` to use `git pull --rebase --autostash origin main`
+### Workflow fails with "untracked working tree files would be overwritten"
+- This happens when generated files (like `history.json`) conflict during `git pull`
+- Use the latest `auto-sync.yml` from this folder — it stages all generated files before pulling
 
 ### No data in latest.json
 - Verify your Intervals.icu API key is valid
@@ -173,6 +179,11 @@ https://raw.githubusercontent.com/[your-username]/[repo-name]/main/latest.json
 ### ftp_history.json not updating on GitHub
 - Ensure your `auto-sync.yml` includes `git add ftp_history.json`
 - Check workflow logs for git errors
+
+### history.json not generated
+- History generates automatically on first run, then regenerates when outdated
+- Delete `history.json` from your repo and re-run to force regeneration
+- Check workflow logs — history generation is non-critical and won't fail the sync
 
 ### 404 error on JSON URL
 - Ensure `latest.json` exists in repo root
@@ -219,6 +230,11 @@ For additional privacy, use a separate GitHub account for your data repository.
 
 | File | Purpose | Auto-created |
 |------|---------|--------------|
-| `latest.json` | Current training data for AI consumption | Yes |
+| `latest.json` | Current 7-day training data for AI consumption | Yes |
+| `history.json` | Longitudinal data — daily (90d), weekly (180d), monthly (3y) | Yes |
 | `ftp_history.json` | FTP progression tracking for Benchmark Index | Yes |
 | `archive/` | Timestamped snapshots of each sync | Yes |
+
+## Update Notifications
+
+The sync script automatically checks for upstream protocol updates from the [Section 11 repository](https://github.com/CrankAddict/section-11). When a new version is available, a GitHub Issue is created in your data repo with a summary of changes. No action is needed — just watch your Issues tab.
