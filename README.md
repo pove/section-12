@@ -102,7 +102,7 @@ See Section 11 → Communication Style and Output Format Guidelines for full rul
 
 ## RULES:
 - Follow Section 11 validation checklist (Step 0: Data Source Fetch)
-- No virtual math — use only fetched values
+- No virtual math on pre-computed metrics — use fetched values for CTL, ATL, TSB, ACWR, RI, zones, etc. Custom analysis from raw data is fine when pre-computed values don't cover the question
 - TSB −10 to −30 is typically normal — don't recommend recovery unless other triggers present
 - Metric hierarchy: Tier 1 (RI, HRV, RHR, Feel) → Tier 2 (Stress Tolerance, Load-Recovery Ratio, ACWR) → Tier 3 (diagnostics)
 - Brief when metrics are normal. Detailed when thresholds are breached or I ask "why"
