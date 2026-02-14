@@ -70,3 +70,38 @@ On each heartbeat, follow the checks and scheduling rules defined in your HEARTB
 - Daily: training/wellness observations (from latest.json), weather (only if conditions are good)
 - Weekly: background analysis (use history.json for trend comparison)
 - Self-schedule next heartbeat with randomized timing within notification hours
+
+## Security & Privacy
+
+**Data ownership & storage**
+All training data is stored where the user chooses: on their own device or in a Git repository they control. This project does not run any backend service, cloud storage, or third-party infrastructure. Nothing is uploaded anywhere unless the user explicitly configures it.
+
+**Anonymization**
+`sync.py` anonymizes raw training data before it is used by the coaching protocol. Identifying information is stripped; only aggregated and derived metrics (CTL, ATL, TSB, zone distributions, power/HR summaries) are used by the AI coach.
+
+**Network behavior**
+The skill performs simple HTTP GET requests to fetch:
+- The coaching protocol (`SECTION_11.md`) from this repository
+- Report templates from this repository
+- Athlete training data (`latest.json`, `history.json`) from user-configured URLs
+
+It does **not** send API keys, LLM chat histories, or any user data to external URLs. All fetched content comes from sources the user has explicitly configured.
+
+**Recommended setup: local files or private repos**
+The safest and simplest setup is fully local: export your data as JSON and point the skill at files on your device (see `examples/json-manual/`). If you use GitHub, use a **private repository**.
+
+For private repo usage with agents, see the setup guide: `PRIVATE_REPO_GUIDE.md`
+
+**Protocol and template URLs**
+The default protocol and template URLs point to this repository. The risk model is standard open-source supply-chain.
+
+**Heartbeat / automation**
+The heartbeat mechanism is fully opt-in. It is not enabled by default and nothing runs automatically unless the user explicitly configures it. When enabled, it performs a narrow set of actions: read training data, run analysis, write updated summaries/plans to the user's chosen location.
+
+**Private repositories & agent access**
+Section 11 does not implement GitHub authentication. It reads files from whatever locations the runtime environment can already access:
+- Running locally: reads from your filesystem
+- Running in an agent (OpenClaw, Claude Cowork, etc.) with GitHub access configured: can read/write repos that the agent's token/SSH key allows
+
+Access is entirely governed by credentials the user has already configured in their environment.
+
