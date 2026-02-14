@@ -1,4 +1,3 @@
-
 #!/usr/bin/env python3
 """
 Intervals.icu → GitHub/Local JSON Export
@@ -40,7 +39,7 @@ class IntervalsSync:
     HISTORY_FILE = "history.json"
     UPSTREAM_REPO = "CrankAddict/section-11"
     CHANGELOG_FILE = "changelog.json"
-    VERSION = "3.3.1"
+    VERSION = "3.3.2"
     
     def __init__(self, athlete_id: str, intervals_api_key: str, github_token: str = None, 
                  github_repo: str = None, debug: bool = False):
@@ -593,7 +592,9 @@ class IntervalsSync:
         )
         
         # === HARD DAYS THIS WEEK ===
-        # Count days with >=120s of Z4+ time (matches Seiler's session-based intensity tracking)
+        # Zone ladder with cumulative thresholds (z+ = zone + all above)
+        # z3+ >= 1800s, z4+ >= 600s, z5+ >= 300s, z6+ >= 120s, z7 >= 60s
+        # Per Seiler's polarized model + Foster's session RPE scaling
         hard_days_this_week = 0
         activities_by_date_7d = {}
         for a in activities_7d:
@@ -603,15 +604,37 @@ class IntervalsSync:
             activities_by_date_7d[a_date].append(a)
         
         for date_str, day_acts in activities_by_date_7d.items():
-            day_z4_plus = 0
+            day_z3 = 0
+            day_z4 = 0
+            day_z5 = 0
+            day_z6 = 0
+            day_z7 = 0
             for a in day_acts:
                 icu_zone_times = a.get("icu_zone_times", [])
                 if icu_zone_times:
                     for zone in icu_zone_times:
                         zid = zone.get("id", "").lower()
-                        if zid in ["z4", "z5", "z6", "z7"]:
-                            day_z4_plus += zone.get("secs", 0)
-            if day_z4_plus >= 120:
+                        secs = zone.get("secs", 0)
+                        if zid == "z3":
+                            day_z3 += secs
+                        elif zid == "z4":
+                            day_z4 += secs
+                        elif zid == "z5":
+                            day_z5 += secs
+                        elif zid == "z6":
+                            day_z6 += secs
+                        elif zid == "z7":
+                            day_z7 += secs
+            # Zone ladder: cumulative thresholds (z+ = zone + all above)
+            # Per Seiler's polarized model + Foster's session RPE scaling
+            is_hard = (
+                (day_z3 + day_z4 + day_z5 + day_z6 + day_z7) >= 1800 or  # z3+: 30 min tempo+
+                (day_z4 + day_z5 + day_z6 + day_z7) >= 600 or            # z4+: 10 min threshold+
+                (day_z5 + day_z6 + day_z7) >= 300 or                      # z5+: 5 min VO2max+
+                (day_z6 + day_z7) >= 120 or                                # z6+: 2 min anaerobic+
+                day_z7 >= 60                                                # z7:  1 min neuromuscular
+            )
+            if is_hard:
                 hard_days_this_week += 1
         
         # === PHASE DETECTION ===
@@ -669,7 +692,7 @@ class IntervalsSync:
             "polarisation_index": polarisation_index,
             "polarisation_note": "Easy time (Z1+Z2) / Total - target ~80% in polarized training",
             "hard_days_this_week": hard_days_this_week,
-            "hard_days_note": "Days with >=120s Z4+ time. Per Seiler, session count is more meaningful than time-in-zone for high-volume athletes",
+            "hard_days_note": "Zone ladder: z3+ >= 30min, z4+ >= 10min, z5+ >= 5min, z6+ >= 2min, z7 >= 1min. Cumulative thresholds per Seiler/Foster — higher zones need less time to qualify as hard",
             
             # Tier 3: Consistency & Compliance
             "consistency_index": consistency_index,
@@ -1474,18 +1497,37 @@ class IntervalsSync:
             total_seconds = sum(a.get("moving_time", 0) or 0 for a in day_activities)
             activity_types = list(set(a.get("type", "Unknown") for a in day_activities)) if day_activities else ["Rest"]
             
-            # Zone analysis for hard day detection
-            # Minimum 120s of Z4+ across all activities to count as hard
-            # (filters brief HR spikes from walks while catching short interval sessions)
-            day_z4_plus = 0
+            # Zone ladder for hard day detection
+            # Cumulative thresholds: z3+ / z4+ / z5+ / z6+ / z7
+            # Per Seiler's polarized model + Foster's session RPE scaling
+            day_z3 = 0
+            day_z4 = 0
+            day_z5 = 0
+            day_z6 = 0
+            day_z7 = 0
             for a in day_activities:
                 icu_zone_times = a.get("icu_zone_times", [])
                 if icu_zone_times:
                     for zone in icu_zone_times:
                         zid = zone.get("id", "").lower()
-                        if zid in ["z4", "z5", "z6", "z7"]:
-                            day_z4_plus += zone.get("secs", 0)
-            is_hard = day_z4_plus >= 120
+                        secs = zone.get("secs", 0)
+                        if zid == "z3":
+                            day_z3 += secs
+                        elif zid == "z4":
+                            day_z4 += secs
+                        elif zid == "z5":
+                            day_z5 += secs
+                        elif zid == "z6":
+                            day_z6 += secs
+                        elif zid == "z7":
+                            day_z7 += secs
+            is_hard = (
+                (day_z3 + day_z4 + day_z5 + day_z6 + day_z7) >= 1800 or
+                (day_z4 + day_z5 + day_z6 + day_z7) >= 600 or
+                (day_z5 + day_z6 + day_z7) >= 300 or
+                (day_z6 + day_z7) >= 120 or
+                day_z7 >= 60
+            )
             
             rows.append({
                 "date": date_str,
@@ -1580,7 +1622,11 @@ class IntervalsSync:
                 ramp_rate = wellness.get("rampRate") or ramp_rate
                 
                 # Zone and hard day analysis
-                day_z4_plus = 0
+                day_z3 = 0
+                day_z4 = 0
+                day_z5 = 0
+                day_z6 = 0
+                day_z7 = 0
                 for a in day_activities:
                     ride_seconds = a.get("moving_time", 0) or 0
                     if ride_seconds > longest_ride:
@@ -1595,16 +1641,32 @@ class IntervalsSync:
                                 z1_z2_time += secs
                             elif zid == "z3":
                                 z3_time += secs
-                            elif zid in ["z4", "z5", "z6", "z7"]:
+                                day_z3 += secs
+                            elif zid == "z4":
                                 z4_plus_time += secs
-                                day_z4_plus += secs
+                                day_z4 += secs
+                            elif zid == "z5":
+                                z4_plus_time += secs
+                                day_z5 += secs
+                            elif zid == "z6":
+                                z4_plus_time += secs
+                                day_z6 += secs
+                            elif zid == "z7":
+                                z4_plus_time += secs
+                                day_z7 += secs
                             total_zone_time += secs
                     
                     feel = a.get("feel")
                     if feel:
                         week_feel.append(feel)
                 
-                if day_z4_plus >= 120:
+                if (
+                    (day_z3 + day_z4 + day_z5 + day_z6 + day_z7) >= 1800 or
+                    (day_z4 + day_z5 + day_z6 + day_z7) >= 600 or
+                    (day_z5 + day_z6 + day_z7) >= 300 or
+                    (day_z6 + day_z7) >= 120 or
+                    day_z7 >= 60
+                ):
                     hard_days += 1
             
             if ctl_end and atl_end:
@@ -1697,7 +1759,11 @@ class IntervalsSync:
                 if wellness.get("ctl"):
                     ctl_values.append(wellness["ctl"])
                 
-                day_z4_plus = 0
+                day_z3 = 0
+                day_z4 = 0
+                day_z5 = 0
+                day_z6 = 0
+                day_z7 = 0
                 for a in day_activities:
                     ride_seconds = a.get("moving_time", 0) or 0
                     if ride_seconds > longest_ride:
@@ -1712,12 +1778,28 @@ class IntervalsSync:
                                 z1_z2_time += secs
                             elif zid == "z3":
                                 z3_time += secs
-                            elif zid in ["z4", "z5", "z6", "z7"]:
+                                day_z3 += secs
+                            elif zid == "z4":
                                 z4_plus_time += secs
-                                day_z4_plus += secs
+                                day_z4 += secs
+                            elif zid == "z5":
+                                z4_plus_time += secs
+                                day_z5 += secs
+                            elif zid == "z6":
+                                z4_plus_time += secs
+                                day_z6 += secs
+                            elif zid == "z7":
+                                z4_plus_time += secs
+                                day_z7 += secs
                             total_zone_time += secs
                 
-                if day_z4_plus >= 120:
+                if (
+                    (day_z3 + day_z4 + day_z5 + day_z6 + day_z7) >= 1800 or
+                    (day_z4 + day_z5 + day_z6 + day_z7) >= 600 or
+                    (day_z5 + day_z6 + day_z7) >= 300 or
+                    (day_z6 + day_z7) >= 120 or
+                    day_z7 >= 60
+                ):
                     hard_days_total += 1
                 
                 date += timedelta(days=1)
