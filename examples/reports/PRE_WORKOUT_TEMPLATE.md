@@ -20,10 +20,11 @@ TSB: [X.XX]
 CTL: [XX.XX]
 ATL: [XX.XX]
 ACWR: [X.XX] ([assessment])
+Recovery Index: [X.XX] ([assessment])
 Ramp Rate: [X.XX]
 Load/Recovery: [X.X] (tolerance [X.X]) — [context note if near edge]
 Polarization: Z1+Z2 [XX]%, Z3 [X]%, Z4+ [X]% — [Classification] (PI: [X.XX])
-Monotony: [X.X] — [note] (omit entirely if ≤2.3)
+Monotony: [X.XX] ([primary sport] [X.XX], total [X.XX]) — [note]
 Total hours, last 7 days: [XX.XX] hours
 Total activities, last 7 days: [XX]
 Total TSS, last 7 days: [XXX]
