@@ -4,7 +4,7 @@ Intervals.icu → GitHub/Local JSON Export
 Exports training data for LLM access.
 Supports both automated GitHub sync and manual local export.
 
-Version 3.4.0 - Seiler TID & Polarization Index
+Version 3.3.4 - Seiler TID & Polarization Index
   - Seiler 3-zone TID classification (Polarized/Pyramidal/Threshold/HIT/Base)
   - Treff Polarization Index (PI) with proper edge-case handling
   - Dual calculation: all-sport and primary-sport TID (like monotony)
