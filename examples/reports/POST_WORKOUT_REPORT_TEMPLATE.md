@@ -37,6 +37,7 @@ CTL: [XX.XX]
 ATL: [XX.XX]
 Ramp rate: [X.XX]
 ACWR: [X.XX] ([assessment])
+Recovery Index: [X.XX]
 Hours: [XX.XX]
 TSS: [XXX]
 
