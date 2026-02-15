@@ -4,6 +4,12 @@ Intervals.icu → GitHub/Local JSON Export
 Exports training data for LLM access.
 Supports both automated GitHub sync and manual local export.
 
+Version 3.4.0 - Seiler TID & Polarization Index
+  - Seiler 3-zone TID classification (Polarized/Pyramidal/Threshold/HIT/Base)
+  - Treff Polarization Index (PI) with proper edge-case handling
+  - Dual calculation: all-sport and primary-sport TID (like monotony)
+  - Correct 7→3 zone mapping: Seiler Z1=z1+z2, Z2=z3, Z3=z4+
+
 Version 3.3.0 - Alerts, History & Notifications
   - Graduated alerts array with flag/alarm severity and persistence tracking
   - Monotony deload context detection (suppresses false positives)
@@ -39,7 +45,31 @@ class IntervalsSync:
     HISTORY_FILE = "history.json"
     UPSTREAM_REPO = "CrankAddict/section-11"
     CHANGELOG_FILE = "changelog.json"
-    VERSION = "3.3.2"
+    VERSION = "3.3.4"
+
+    # Sport family mapping for per-sport monotony calculation
+    # Multi-sport athletes get inflated total monotony when cross-training
+    # adds a consistent TSS floor across days. Per-sport monotony isolates
+    # the actual load variation within each modality.
+    SPORT_FAMILIES = {
+        "Ride": "cycling",
+        "VirtualRide": "cycling",
+        "MountainBikeRide": "cycling",
+        "GravelRide": "cycling",
+        "EBikeRide": "cycling",
+        "VirtualSki": "ski",
+        "NordicSki": "ski",
+        "Walk": "walk",
+        "Hike": "walk",
+        "Run": "run",
+        "VirtualRun": "run",
+        "TrailRun": "run",
+        "Swim": "swim",
+        "Rowing": "rowing",
+        "WeightTraining": "strength",
+        "Yoga": "other",
+        "Workout": "other",
+    }
     
     def __init__(self, athlete_id: str, intervals_api_key: str, github_token: str = None, 
                  github_repo: str = None, debug: bool = False):
@@ -509,7 +539,7 @@ class IntervalsSync:
         chronic_load = tss_28d_total / 28 if tss_28d_total else 0
         acwr = round(acute_load / chronic_load, 2) if chronic_load > 0 else None
         
-        # === MONOTONY ===
+        # === MONOTONY (Total) ===
         # Formula: mean(daily_tss) / stdev(daily_tss)
         # Reference: Foster (1998) - values >2.0 indicate increased illness risk
         if len(daily_tss_7d) > 1 and any(daily_tss_7d):
@@ -522,7 +552,47 @@ class IntervalsSync:
         else:
             monotony = None
             mean_tss = 0
-        
+
+        # === PRIMARY SPORT MONOTONY (v3.3.3) ===
+        # Multi-sport athletes get inflated total monotony when cross-training
+        # adds a consistent TSS floor across days. Per-sport monotony isolates
+        # the actual load variation within each modality.
+        daily_tss_by_sport = self._get_daily_tss_by_sport(activities_7d, days=7)
+        primary_sport = None
+        primary_sport_monotony = None
+        primary_sport_tss_7d = None
+
+        if daily_tss_by_sport:
+            # Primary sport = highest 7-day TSS total
+            sport_totals = {sport: sum(days) for sport, days in daily_tss_by_sport.items()}
+            primary_sport = max(sport_totals, key=sport_totals.get) if sport_totals else None
+
+            if primary_sport:
+                primary_days = daily_tss_by_sport[primary_sport]
+                primary_sport_tss_7d = round(sum(primary_days), 0)
+                # Require ≥3 active days for meaningful monotony
+                active_days = sum(1 for d in primary_days if d > 0)
+                if active_days >= 3 and len(primary_days) > 1:
+                    try:
+                        ps_mean = statistics.mean(primary_days)
+                        ps_stdev = statistics.stdev(primary_days)
+                        primary_sport_monotony = round(ps_mean / ps_stdev, 2) if ps_stdev > 0 else None
+                    except:
+                        primary_sport_monotony = None
+
+                if self.debug:
+                    print(f"  Primary sport: {primary_sport} (TSS: {primary_sport_tss_7d})")
+                    print(f"  Primary sport monotony: {primary_sport_monotony}")
+                    print(f"  Total monotony: {monotony}")
+                    if primary_sport_monotony and monotony and primary_sport_monotony < monotony:
+                        print(f"  → Multi-sport inflation detected ({monotony} total vs {primary_sport_monotony} primary)")
+
+        # Determine effective monotony for alerts:
+        # Use primary sport monotony when available and multi-sport detected,
+        # fall back to total monotony otherwise
+        is_multi_sport = len(daily_tss_by_sport) > 1
+        effective_monotony = primary_sport_monotony if (is_multi_sport and primary_sport_monotony is not None) else monotony
+
         # === STRAIN ===
         # Formula: 7-day total TSS × Monotony
         # Reference: Foster (1998) - values >3500-4000 associated with overtraining
@@ -586,6 +656,27 @@ class IntervalsSync:
         # Target: ~80% for polarized training
         polarisation_index = round((z1_time + z2_time) / total_zone_time, 2) if total_zone_time > 0 else None
         
+        # === SEILER TID (Training Intensity Distribution) ===
+        # Dual calculation: all-sport and primary-sport (like monotony)
+        # Uses correct 7→3 zone mapping per Treff et al. 2019
+        seiler_tid_all = self._build_seiler_tid(activities_7d)
+
+        seiler_tid_primary = None
+        if primary_sport:
+            seiler_tid_primary = self._build_seiler_tid(
+                activities_7d, sport_family_filter=primary_sport
+            )
+            seiler_tid_primary["sport"] = primary_sport
+
+        if self.debug:
+            pi_all = seiler_tid_all.get("polarization_index")
+            cls_all = seiler_tid_all.get("classification")
+            print(f"  Seiler TID (all): {cls_all}, PI={pi_all}")
+            if seiler_tid_primary:
+                pi_ps = seiler_tid_primary.get("polarization_index")
+                cls_ps = seiler_tid_primary.get("classification")
+                print(f"  Seiler TID ({primary_sport}): {cls_ps}, PI={pi_ps}")
+
         # === CONSISTENCY INDEX ===
         consistency_index, consistency_details = self._calculate_consistency_index(
             activities_for_consistency, past_events
@@ -670,7 +761,12 @@ class IntervalsSync:
             "acwr": acwr,
             "acwr_interpretation": self._interpret_acwr(acwr),
             "monotony": monotony,
-            "monotony_interpretation": "elevated" if monotony and monotony > 2.0 else "normal" if monotony else None,
+            "monotony_interpretation": self._interpret_monotony(monotony, effective_monotony, is_multi_sport),
+            "primary_sport": primary_sport,
+            "primary_sport_monotony": primary_sport_monotony,
+            "primary_sport_tss_7d": primary_sport_tss_7d,
+            "effective_monotony": effective_monotony,
+            "multi_sport_detected": is_multi_sport,
             "strain": strain,
             "stress_tolerance": stress_tolerance,
             "load_recovery_ratio": load_recovery_ratio,
@@ -693,6 +789,10 @@ class IntervalsSync:
             "polarisation_note": "Easy time (Z1+Z2) / Total - target ~80% in polarized training",
             "hard_days_this_week": hard_days_this_week,
             "hard_days_note": "Zone ladder: z3+ >= 30min, z4+ >= 10min, z5+ >= 5min, z6+ >= 2min, z7 >= 1min. Cumulative thresholds per Seiler/Foster — higher zones need less time to qualify as hard",
+            
+            # Tier 3: Seiler TID (Training Intensity Distribution)
+            "seiler_tid_7d": seiler_tid_all,
+            "seiler_tid_7d_primary": seiler_tid_primary,
             
             # Tier 3: Consistency & Compliance
             "consistency_index": consistency_index,
@@ -754,7 +854,27 @@ class IntervalsSync:
             return "caution"
         else:
             return "danger"
-    
+
+    def _interpret_monotony(self, total_monotony: float, effective_monotony: float, is_multi_sport: bool) -> Optional[str]:
+        """
+        Interpret monotony with multi-sport awareness.
+        When multi-sport training inflates total monotony, the interpretation
+        reflects the effective (primary sport) value instead.
+        """
+        if effective_monotony is None:
+            return None
+        if is_multi_sport and total_monotony and effective_monotony < total_monotony:
+            # Multi-sport inflation detected
+            if effective_monotony > 2.0:
+                return f"elevated (primary sport {effective_monotony}, total {total_monotony} inflated by multi-sport)"
+            else:
+                return f"normal (primary sport {effective_monotony}, total {total_monotony} inflated by multi-sport)"
+        else:
+            if effective_monotony > 2.0:
+                return "elevated"
+            else:
+                return "normal"
+
     def _calculate_consistency_index(self, activities: List[Dict], 
                                       past_events: List[Dict]) -> Tuple[Optional[float], Dict]:
         """
@@ -864,7 +984,38 @@ class IntervalsSync:
             result.append(daily_tss.get(date, 0))
         
         return result
-    
+
+    def _get_daily_tss_by_sport(self, activities: List[Dict], days: int) -> Dict[str, List[float]]:
+        """
+        Aggregate TSS by day AND sport family for per-sport monotony calculation.
+        Returns dict of sport_family → [daily_tss_day1, daily_tss_day2, ...] (N elements).
+        Only includes sport families that have at least one activity with TSS > 0.
+        Sport families are mapped via SPORT_FAMILIES class constant.
+        Unmapped activity types are grouped as "other".
+        """
+        # Collect all sport families present and their daily TSS
+        sport_daily_tss = defaultdict(lambda: defaultdict(float))
+
+        for act in activities:
+            date_str = act.get("start_date_local", "")[:10]
+            tss = act.get("icu_training_load") or 0
+            if tss <= 0:
+                continue
+            activity_type = act.get("type", "Unknown")
+            sport_family = self.SPORT_FAMILIES.get(activity_type, "other")
+            sport_daily_tss[sport_family][date_str] += tss
+
+        # Build daily arrays for each sport family (including 0 days)
+        result = {}
+        for sport_family, daily_dict in sport_daily_tss.items():
+            daily_array = []
+            for i in range(days - 1, -1, -1):
+                date = (datetime.now() - timedelta(days=i)).strftime("%Y-%m-%d")
+                daily_array.append(daily_dict.get(date, 0))
+            result[sport_family] = daily_array
+
+        return result
+
     def _aggregate_zones(self, activities: List[Dict]) -> Dict:
         """
         Aggregate zone times across all activities.
@@ -925,6 +1076,185 @@ class IntervalsSync:
             "total_time": total_time
         }
     
+    # === SEILER TID (Training Intensity Distribution) v3.4.0 ===
+
+    def _aggregate_seiler_zones(self, activities: List[Dict],
+                                sport_family_filter: str = None) -> Dict:
+        """
+        Aggregate 7-zone times into Seiler 3-zone model.
+
+        Mapping (per Treff et al. 2019):
+            Seiler Z1 = z1 + z2  (below LT1)
+            Seiler Z2 = z3       (between LT1 and LT2)
+            Seiler Z3 = z4 + z5 + z6 + z7  (above LT2)
+
+        Uses power zones when available, falls back to HR zones.
+
+        Args:
+            activities: List of activity dicts with zone data
+            sport_family_filter: If set, only include activities matching
+                                 this sport family (from SPORT_FAMILIES)
+
+        Returns dict with z1_seconds, z2_seconds, z3_seconds, total_seconds
+        """
+        sz1 = 0
+        sz2 = 0
+        sz3 = 0
+
+        for act in activities:
+            # Apply sport family filter if specified
+            if sport_family_filter:
+                activity_type = act.get("type", "Unknown")
+                if self.SPORT_FAMILIES.get(activity_type, "other") != sport_family_filter:
+                    continue
+
+            zones = None
+
+            # Power zones (preferred)
+            icu_zone_times = act.get("icu_zone_times", [])
+            if icu_zone_times:
+                pz = {}
+                for zone in icu_zone_times:
+                    zone_id = zone.get("id", "").lower()
+                    secs = zone.get("secs", 0)
+                    if zone_id in ["z1", "z2", "z3", "z4", "z5", "z6", "z7"]:
+                        pz[zone_id] = secs
+                if pz:
+                    zones = pz
+
+            # HR zones (fallback)
+            if not zones:
+                icu_hr_zone_times = act.get("icu_hr_zone_times", [])
+                if icu_hr_zone_times:
+                    zone_labels = ["z1", "z2", "z3", "z4", "z5", "z6", "z7"]
+                    hz = {}
+                    for idx, secs in enumerate(icu_hr_zone_times):
+                        if idx < len(zone_labels) and secs:
+                            hz[zone_labels[idx]] = secs
+                    if hz:
+                        zones = hz
+
+            if zones:
+                sz1 += zones.get("z1", 0) + zones.get("z2", 0)
+                sz2 += zones.get("z3", 0)
+                sz3 += (zones.get("z4", 0) + zones.get("z5", 0) +
+                        zones.get("z6", 0) + zones.get("z7", 0))
+
+        total = sz1 + sz2 + sz3
+        return {
+            "z1_seconds": sz1,
+            "z2_seconds": sz2,
+            "z3_seconds": sz3,
+            "total_seconds": total
+        }
+
+    def _calculate_polarization_index(self, z1_frac: float, z2_frac: float,
+                                       z3_frac: float) -> Optional[float]:
+        """
+        Calculate Treff Polarization Index.
+
+        Formula: PI = log10((Z1 / Z2) × Z3 × 100)
+
+        Rules (per Treff et al. 2019 + updated literature):
+        - Only compute when Z1 > Z3 > Z2 and Z3 >= 0.01
+        - If Z2 = 0 but structure is polarized: substitute Z2 = 0.01
+        - Otherwise: return None (not a polarization score)
+        """
+        if z3_frac < 0.01:
+            return None
+        if not (z1_frac > z3_frac > z2_frac):
+            return None
+
+        # Handle Z2 = 0 with substitution (per updated PI formulation)
+        effective_z2 = z2_frac if z2_frac > 0 else 0.01
+
+        try:
+            raw = (z1_frac / effective_z2) * z3_frac * 100
+            if raw <= 0:
+                return None
+            return round(math.log10(raw), 2)
+        except (ValueError, ZeroDivisionError):
+            return None
+
+    def _classify_tid(self, z1_frac: float, z2_frac: float,
+                      z3_frac: float, pi: Optional[float]) -> str:
+        """
+        Classify Training Intensity Distribution.
+
+        Explicit priority order (to avoid overlaps):
+        1. Z3 < 0.01 and Z1 largest → Base
+        2. Z1 > Z3 > Z2 and PI > 2.0 → Polarized
+        3. Z1 > Z2 > Z3 → Pyramidal
+        4. Z2 largest → Threshold
+        5. Z3 largest → High Intensity
+        """
+        # 1. Base: Z3 near zero, Z1 dominant
+        if z3_frac < 0.01 and z1_frac >= z2_frac and z1_frac >= z3_frac:
+            return "Base"
+
+        # 2. Polarized: Z1 > Z3 > Z2 and PI > 2.0
+        if z1_frac > z3_frac > z2_frac and pi is not None and pi > 2.0:
+            return "Polarized"
+
+        # 3. Pyramidal: Z1 > Z2 > Z3
+        if z1_frac > z2_frac > z3_frac:
+            return "Pyramidal"
+
+        # 4. Threshold: Z2 dominant
+        if z2_frac >= z1_frac and z2_frac >= z3_frac:
+            return "Threshold"
+
+        # 5. High Intensity: Z3 dominant
+        if z3_frac >= z1_frac and z3_frac >= z2_frac:
+            return "High Intensity"
+
+        # Fallback: polarized structure but PI <= 2.0
+        return "Pyramidal"
+
+    def _build_seiler_tid(self, activities: List[Dict],
+                          sport_family_filter: str = None) -> Dict:
+        """
+        Build complete Seiler TID structure for given activities.
+
+        Returns dict with:
+            z1_seconds, z2_seconds, z3_seconds
+            z1_pct, z2_pct, z3_pct
+            polarization_index (float or null)
+            classification (string)
+        """
+        zones = self._aggregate_seiler_zones(activities, sport_family_filter)
+        total = zones["total_seconds"]
+
+        if total == 0:
+            return {
+                "z1_seconds": 0,
+                "z2_seconds": 0,
+                "z3_seconds": 0,
+                "z1_pct": None,
+                "z2_pct": None,
+                "z3_pct": None,
+                "polarization_index": None,
+                "classification": None
+            }
+
+        z1_frac = zones["z1_seconds"] / total
+        z2_frac = zones["z2_seconds"] / total
+        z3_frac = zones["z3_seconds"] / total
+
+        pi = self._calculate_polarization_index(z1_frac, z2_frac, z3_frac)
+        classification = self._classify_tid(z1_frac, z2_frac, z3_frac, pi)
+
+        return {
+            "z1_seconds": zones["z1_seconds"],
+            "z2_seconds": zones["z2_seconds"],
+            "z3_seconds": zones["z3_seconds"],
+            "z1_pct": round(z1_frac * 100, 1),
+            "z2_pct": round(z2_frac * 100, 1),
+            "z3_pct": round(z3_frac * 100, 1),
+            "polarization_index": pi,
+            "classification": classification
+        }
+
     def _detect_phase(self, acwr: float, ri: float, quality_intensity_pct: float,
                       hard_days_per_week: int,
                       strain: float, monotony: float, tsb: float, ctl: float) -> Tuple[str, List[str]]:
@@ -1029,11 +1359,18 @@ class IntervalsSync:
         
         Severity levels: "info" → "warning" → "alarm"
         Empty array = green light.
+        
+        Monotony alerts use effective_monotony (primary sport when multi-sport
+        detected) to avoid false positives from cross-training TSS floor inflation.
         """
         alerts = []
         
         acwr = derived_metrics.get("acwr")
         monotony = derived_metrics.get("monotony")
+        effective_monotony = derived_metrics.get("effective_monotony")
+        primary_sport = derived_metrics.get("primary_sport")
+        primary_sport_monotony = derived_metrics.get("primary_sport_monotony")
+        is_multi_sport = derived_metrics.get("multi_sport_detected", False)
         strain = derived_metrics.get("strain")
         ri = derived_metrics.get("recovery_index")
         latest_hrv = derived_metrics.get("latest_hrv")
@@ -1064,49 +1401,57 @@ class IntervalsSync:
                     "tier": 2
                 })
         
-        # --- Monotony Alerts (with deload context) ---
-        if monotony is not None:
+        # --- Monotony Alerts (with deload context + multi-sport awareness) ---
+        # Use effective_monotony for alert thresholds. When multi-sport training
+        # is detected and primary sport monotony is lower than total, the effective
+        # value reflects the actual training load variation of the main modality.
+        if effective_monotony is not None:
             deload_context = self._detect_deload_context(tss_7d_total, tss_28d_total)
-            
-            if monotony >= 2.5:
+
+            # Build context string for multi-sport cases
+            multi_sport_note = ""
+            if is_multi_sport and primary_sport_monotony is not None and monotony is not None and primary_sport_monotony < monotony:
+                multi_sport_note = f" (total monotony {monotony} inflated by multi-sport training; {primary_sport} monotony {primary_sport_monotony} used for alerting)"
+
+            if effective_monotony >= 2.5:
                 if deload_context:
                     alerts.append({
                         "metric": "monotony",
-                        "value": monotony,
+                        "value": effective_monotony,
                         "severity": "info",
                         "threshold": 2.5,
-                        "context": f"Monotony {monotony} ≥ 2.5 but {deload_context}. Structural artifact, not overuse risk. Will normalize as 7-day window rolls forward.",
+                        "context": f"Monotony {effective_monotony} ≥ 2.5 but {deload_context}. Structural artifact, not overuse risk. Will normalize as 7-day window rolls forward.{multi_sport_note}",
                         "persistence_days": None,
                         "tier": 2
                     })
                 else:
                     alerts.append({
                         "metric": "monotony",
-                        "value": monotony,
+                        "value": effective_monotony,
                         "severity": "alarm",
                         "threshold": 2.5,
-                        "context": f"Monotony {monotony} ≥ 2.5. Overuse risk elevated. Vary training load.",
+                        "context": f"Monotony {effective_monotony} ≥ 2.5. Overuse risk elevated. Vary training load.{multi_sport_note}",
                         "persistence_days": None,
                         "tier": 2
                     })
-            elif monotony >= 2.3:
+            elif effective_monotony >= 2.3:
                 if deload_context:
                     alerts.append({
                         "metric": "monotony",
-                        "value": monotony,
+                        "value": effective_monotony,
                         "severity": "info",
                         "threshold": 2.3,
-                        "context": f"Monotony {monotony} approaching threshold but {deload_context}. Expected, not actionable.",
+                        "context": f"Monotony {effective_monotony} approaching threshold but {deload_context}. Expected, not actionable.{multi_sport_note}",
                         "persistence_days": None,
                         "tier": 2
                     })
                 else:
                     alerts.append({
                         "metric": "monotony",
-                        "value": monotony,
+                        "value": effective_monotony,
                         "severity": "warning",
                         "threshold": 2.3,
-                        "context": f"Monotony {monotony} approaching overuse threshold. Alarm at 2.5.",
+                        "context": f"Monotony {effective_monotony} approaching overuse threshold. Alarm at 2.5.{multi_sport_note}",
                         "persistence_days": None,
                         "tier": 2
                     })
@@ -2463,6 +2808,11 @@ def main():
         print(f"   Gray Zone %: {dm.get('grey_zone_percentage')}%")
         print(f"   Quality Intensity %: {dm.get('quality_intensity_percentage')}%")
         print(f"   Polarisation: {dm.get('polarisation_index')} (target ~0.80)")
+        tid = dm.get('seiler_tid_7d', {})
+        tid_ps = dm.get('seiler_tid_7d_primary', {})
+        print(f"   Seiler TID: {tid.get('classification')} (PI: {tid.get('polarization_index')}) — Z1:{tid.get('z1_pct')}% Z2:{tid.get('z2_pct')}% Z3:{tid.get('z3_pct')}%")
+        if tid_ps:
+            print(f"   Seiler TID ({tid_ps.get('sport')}): {tid_ps.get('classification')} (PI: {tid_ps.get('polarization_index')}) — Z1:{tid_ps.get('z1_pct')}% Z2:{tid_ps.get('z2_pct')}% Z3:{tid_ps.get('z3_pct')}%")
         print(f"   Consistency: {dm.get('consistency_index')}")
         print(f"   Phase: {dm.get('phase_detected')}")
         print(f"\n📈 Performance (from API):")
