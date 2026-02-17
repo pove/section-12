@@ -1,46 +1,30 @@
 # Section 11 — AI Coach Protocol
 
-**Protocol Version:** 11.4  
-**Last Updated:** 2026-02-12  
+**Protocol Version:** 11.5  
+**Last Updated:** 2026-02-17  
 **License:** [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/)
 
 ### Changelog
 
-**v11.4 — Alerts, History & Confidence:**
-- Added Graduated Alert Thresholds with flag/alarm severity levels and persistence rules
-- Added Monotony Deload Context rule (suppresses false positives during/after deload weeks)
-- Added history.json reference in Data Mirror Integration for longitudinal context
-- Added Data Source Usage Hierarchy (latest.json vs history.json)
-- Added Confidence Scoring (data_confidence + history_confidence)
-- Added Alerts Array acknowledgment in Output Format Guidelines
-- Extended RI persistence rules (>1 day flag, 3 days deload review)
+**v11.5 — Capability Metrics, Seiler TID & Aggregate Durability:**
+- Added Seiler TID Classification System (Treff PI formula, 5-class classifier, 7→3 zone mapping)
+- Added Dual-Timeframe TID (7d vs 28d) with drift detection (consistent/shifting/acute_depolarization)
+- Added Aggregate Durability (rolling 7d/28d mean decoupling from steady-state sessions)
+- Added Capability Metrics namespace and concept (how fitness is expressed, not just load)
+- Added Treff et al. (2019), Maunder et al. (2021), Rothschild & Maunder (2025) to Core Evidence-Based Foundations
+- Updated Validated Endurance Ranges with durability and TID drift thresholds
+- Updated Metric Evaluation Hierarchy Tier 3 with capability metrics
+- Updated Output Format Guidelines to include durability and TID 28d in report requirements
+- Updated Communication Style weekly totals to include capability metrics
+- Updated Validation Metadata Schema to v11.5 with capability metric fields
+- Fixed changelog severity terminology: "flag/alarm" → "warning/alarm" to match implementation
+- Clarified relationship between simple Polarisation Index and Treff Polarization Index
 
-**v11.3 — Output Format & Communication:**
-- Updated Communication Style (Section 5) to match post-workout report templates (line-by-line format, corrected field list)
-- Added Output Format Guidelines with pre/post-workout report structure and brevity rule
-- Added public repo link for report templates (examples/reports)
-- Formalized session field list in response structure
-
-**v11.2 — Metrics & Validation Extension:**
-- Added Phase Detection Criteria with deterministic trigger conditions
-- Extended Validated Endurance Ranges (Stress Tolerance, Load-Recovery Ratio, Grey Zone %, Consistency Index)
-- Added Load Management Metrics with explicit hierarchy (primary → secondary → tertiary)
-- Added Zone Distribution Metrics per Seiler's research (Grey Zone Percentage, Quality Intensity Percentage, Hard Days per Week, time-based vs session-based guidance)
-- Added Periodisation Metrics (Specificity Volume Ratio, Benchmark Index with seasonal context)
-- Added Durability Sub-Metrics (Endurance Decay, Z2 Stability) for DI diagnostics
-- Added W′ Balance metrics with data source and confidence requirements
-- Added Plan Adherence Monitoring for prescription compliance validation
-- Extended Validation Metadata Schema (phase, seasonal, compliance, hierarchy, zone distribution, load-recovery fields)
-- Clarified metric evaluation hierarchy (Tier 1 → Tier 2 → Tier 3)
-- Added Dossier Architecture Note (Section 11 as self-contained protocol)
-
-**v11.1 — Structure:**
-- Reordered 11 B/11 C for logical flow (Construction → Validation)
-
-**v11.0 — Foundation:**
-- Introduced modular split (11A: AI Guidance, 11B: Training Plan, 11C: Validation Protocol)
-- Unified terminology (Fatigue Index Ratio, Deterministic Tolerance ±3 W / ±1 %)
-- Confirmed alignment with URF v5.1, RPS Durability, and Intervals.icu v17 frameworks
+**v11.4** — Graduated alerts, history.json, confidence scoring, monotony deload context
+**v11.3** — Output format guidelines, report templates, communication style
+**v11.2** — Phase detection, load management hierarchy, zone distribution, durability sub-metrics, W′ balance
+**v11.1** — Reordered 11B/11C for logical flow
+**v11.0** — Foundation: modular split (11A/11B/11C), unified terminology
 
 ---
 
@@ -68,6 +52,9 @@ Section 11 operates as a **self-contained AI protocol**. All metric definitions,
 | Specificity Volume Tracking | Section 11 (11A) | AI event-prep logic |
 | Benchmark Index | Section 11 (11A, FTP Governance) | AI longitudinal tracking |
 | Zone Distribution Metrics | Section 11 (11A, subsection 9) | AI intensity monitoring |
+| Seiler TID Classification | Section 11 (11A, Zone Distribution) | AI TID classification and drift detection |
+| Aggregate Durability | Section 11 (11A, subsection 9) | AI durability trend tracking |
+| Capability Metrics | Section 11 (11A, subsection 9) | AI capability-layer analysis (durability + TID comparison) |
 | Validation Metadata | Section 11 (11C) | AI audit schema |
 
 AI systems should reference the athlete dossier for athlete-specific values (FTP, zones, goals, schedule) and this protocol for all coaching logic, thresholds, and decision rules.
@@ -160,6 +147,10 @@ All AI analyses, interpretations, and recommendations must be grounded in valida
 |   Friel’s Training Stress Framework                         | Plan adherence, TSS-based progression, and sustainable load control                                                           |
 |   Skiba’s Critical Power Model                              | Fatigue decay and endurance performance prediction using CP–W′ curve                                                          |
 |   Péronnet & Thibault (1989)                                | Long-term power-duration endurance curve validation (used for FTP trend smoothing)                                            |
+|   Treff et al. (2019)                                       | Polarization Index formula for quantitative TID classification: PI = log10((Z1/Z2) × Z3 × 100)                               |
+|   Maunder et al. (2021)                                     | Defined "durability" as resistance to deterioration in physiological profiling during prolonged exercise                       |
+|   Rothschild & Maunder (2025)                               | Validated HR and power decoupling as field-based durability predictors in endurance athletes                                  |
+|   Smyth (2022)                                              | Cardiac drift analysis across 82,303 marathon performances; validated decoupling as durability marker at scale                |
 
 ---
 
@@ -221,12 +212,82 @@ This system applies Seiler's 3-zone endurance framework (Z1 = < LT1, Z2 = LT1–
 | Polarization Combined (All-Sport)| (Z1 + Z2) / Total zone time (HR + Power)| Foster et al. (2001); Seiler & Tønnessen (2009)| Global endurance load structure; ≥ 0.8 = strongly polarized      |
 | Training Monotony Index          | Mean Load / SD(Load)                    | Foster (1998)                             | Evaluates load variation; high values = risk of uniformity or overuse |
 
-**Interpretation Logic:**
+**Simple Polarisation Index** (used in `derived_metrics.polarisation_index`):
+- Formula: `(Z1 + Z2) / Total zone time` — a 0–1 ratio of easy time
+- Target: ≥0.80 for polarized training
+- This is a quick sanity check for 80/20 compliance
+
+**Seiler & Kjerland Interpretation** (theoretical reference — not used for TID classification):
 - Polarization ratio > 1.0 → Polarized distribution
 - Polarization ratio ≈ 0.7–0.9 → Pyramidal distribution
 - Polarization ratio < 0.6 → Threshold-heavy distribution
 
-By combining HR- and power-based zone data, the athlete’s intensity structure remains accurately tracked across all disciplines, ensuring consistency between indoor and outdoor sessions.
+For quantitative TID classification, the protocol uses the **Treff Polarization Index** described below.
+
+By combining HR- and power-based zone data, the athlete's intensity structure remains accurately tracked across all disciplines, ensuring consistency between indoor and outdoor sessions.
+
+---
+
+#### Seiler TID Classification System
+
+The data mirror provides a complete **Training Intensity Distribution (TID)** classification using the Treff et al. (2019) Polarization Index and a 5-class system based on Seiler's 3-zone model.
+
+**Zone Mapping (7-Zone → Seiler 3-Zone):**
+
+| 7-Zone Model | Seiler Zone | Classification | Notes                                                     |
+|--------------|-------------|----------------|-----------------------------------------------------------|
+| Z1–Z2        | Zone 1      | Easy           | Below LT1/VT1 (<2mM lactate)                              |
+| Z3           | Zone 2      | Grey Zone      | Between LT1 and LT2 — minimize in polarized training      |
+| Z4–Z7        | Zone 3      | Hard/Quality   | Above LT2/VT2 (>4mM lactate)                              |
+
+**Treff Polarization Index (PI):**
+
+```
+PI = log10((Z1 / Z2) × Z3 × 100)
+```
+
+Where Z1, Z2, Z3 are fractional time in each Seiler zone (0–1).
+
+**Computation Rules:**
+- Only compute when Z1 > Z3 > Z2 and Z3 ≥ 0.01 (polarized structure required)
+- If Z2 = 0 but structure is polarized: substitute Z2 = 0.01 (avoids division by zero)
+- Otherwise: return null (PI is not meaningful for non-polarized distributions)
+
+**5-Class TID Classifier** (explicit priority order, evaluated top-to-bottom):
+
+| Priority | Classification   | Condition                                      |
+|----------|------------------|-------------------------------------------------|
+| 1        | Base             | Z3 < 0.01 and Z1 is largest zone               |
+| 2        | Polarized        | Z1 > Z3 > Z2 and PI > 2.0                      |
+| 3        | Pyramidal        | Z1 > Z2 > Z3                                   |
+| 4        | Threshold        | Z2 is largest zone                              |
+| 5        | High Intensity   | Z3 is largest zone                              |
+
+If no condition matches (e.g., polarized structure but PI ≤ 2.0), classify as Pyramidal.
+
+**Dual Calculation:** TID is computed twice — for all sports combined and for the primary sport only (like monotony). This catches cases where multi-sport training inflates easy time.
+
+**Dual-Timeframe TID (7d vs 28d):**
+
+The data mirror provides both 7-day (acute) and 28-day (chronic) Seiler TID classifications:
+- `seiler_tid_7d` / `seiler_tid_7d_primary` — current week's distribution
+- `seiler_tid_28d` / `seiler_tid_28d_primary` — 28-day chronic distribution
+
+The `capability.tid_comparison` object compares these windows to detect distribution drift:
+
+| Drift Category          | Condition                                        | Severity |
+|-------------------------|--------------------------------------------------|----------|
+| consistent              | 7d and 28d classification match                  | —        |
+| shifting                | 7d and 28d classification differ                 | warning  |
+| acute_depolarization    | 7d PI < 2.0 AND 28d PI ≥ 2.0                    | warning  |
+
+`pi_delta` (7d PI minus 28d PI) quantifies the magnitude — positive means more polarized acutely.
+
+**AI Response Logic:**
+- `consistent` → No mention needed in reports
+- `shifting` → Note in weekly report; investigate if sustained >2 weeks
+- `acute_depolarization` → Flag in pre-workout and weekly reports; likely indicates fatigue shifting distribution toward grey zone
+- TID drift is a **Tier 3 diagnostic** — it informs coaching context, not go/no-go decisions
 
 ---
 
@@ -435,7 +496,7 @@ Reports use a structured line-by-line format per session, not bullet-point summa
    - Carbs used (g)
    - TSS (actual vs planned)
    Omit fields only if data unavailable for that activity type.
-4. **Weekly totals block:** Polarization, TSB, CTL, ATL, Ramp rate, ACWR, Hours, TSS
+4. **Weekly totals block:** Polarization, Durability (7d/28d + trend), TID 28d (+ drift), TSB, CTL, ATL, Ramp rate, ACWR, Hours, TSS
 5. **Overall:** Coach note (2–4 sentences — compliance, key quality observations, load context, recovery note if applicable)
 
 See **Output Format Guidelines** for full field reference, assessment labels, and report templates.
@@ -444,7 +505,7 @@ See **Output Format Guidelines** for full field reference, assessment labels, an
 - Use single-paragraph responses for workout reviews
 - Use bullet-point lists for session data (use structured line-by-line format)
 - Ask follow-up questions when data is complete and metrics are good
-- Omit weekly totals (polarization, TSB, CTL, ATL, ACWR, hours, TSS)
+- Omit weekly totals (polarization, durability, TID 28d, TSB, CTL, ATL, ACWR, hours, TSS)
 - Cite "per Section 11" or "according to the protocol"
 
 Elaborate only when thresholds are breached or athlete requests deeper analysis.
@@ -492,6 +553,8 @@ When validating datasets, cross-check computed fatigue and load ratios against v
 | Quality Intensity Percentage | See intensity distribution guidance                | —                                  | —                                   | Quality intensity (threshold+) as % of total                        |
 | Hard Days per Week           | 2–3 typical / 1 (base/recovery) / 0 (deload)       | —                                  | —                                   | For high-volume athletes (10+ hrs/week)                             |
 | Consistency Index            | ≥0.9 consistent / <0.8 non-compliant               | —                                  | —                                   | Sessions Completed ÷ Sessions Planned                               |
+| Aggregate Durability (7d)    | <3% good / 3–5% moderate / >5% declining           | 7d mean > 28d mean by >2%         | 28d mean > 5% sustained             | Mean decoupling from steady-state sessions (VI ≤ 1.05, ≥ 90min)    |
+| TID Drift                    | consistent (7d = 28d)                              | shifting (7d ≠ 28d classification) | acute_depolarization (7d PI <2, 28d PI ≥2) | Seiler TID comparison between 7d and 28d windows           |
 
 **Monotony Deload Context:**  
 Monotony may be mathematically elevated during and 2–3 days after a deload week due to uniform low-load sessions in the 7-day rolling window. This is a structural artifact, not an overuse signal. When trailing 7-day TSS is ≥20% below the 28-day weekly average, monotony alerts should include context indicating the elevation is expected and will normalize as the window rolls forward. AI systems must not prescribe load changes based on deload-context monotony alone.
@@ -774,7 +837,7 @@ These metrics are **secondary** to the primary readiness markers defined in Sect
 
 1. **Primary readiness:** RI, HRV, RHR, Feel
 2. **Secondary load metrics:** Stress Tolerance, Load-Recovery Ratio, Consistency Index
-3. **Tertiary diagnostics:** Zone Distribution Metrics, Durability Sub-Metrics
+3. **Tertiary diagnostics:** Zone Distribution Metrics, Durability Sub-Metrics, Capability Metrics (Aggregate Durability, TID Drift)
 
 Do not override primary readiness signals with secondary load metrics.
 
@@ -912,6 +975,51 @@ When Durability Index (DI) drops below 0.95, the following diagnostic metrics he
 
 **Note:** HR–Power Decoupling (existing metric) serves as the cardiac drift diagnostic. Do not duplicate with separate "Aerobic Decay" metric.
 
+#### Aggregate Durability (Capability Metric)
+
+The per-session Durability Sub-Metrics above diagnose *individual session* limitations. The **Aggregate Durability** metric provides a *trend-level* view of aerobic efficiency across multiple sessions, using HR–Power decoupling as the signal.
+
+**Data Source:** The `capability.durability` object in the data mirror provides rolling 7-day and 28-day aggregate decoupling from qualifying steady-state sessions.
+
+**Session Filter (all must be true):**
+- HR–Power decoupling value exists (not null)
+- Variability Index (VI) exists, > 0, and ≤ 1.05 (steady-state power only)
+- Moving time ≥ 5400 seconds (90 minutes)
+
+**Rationale:** Per Maunder et al. (2021) and Rothschild & Maunder (2025), meaningful cardiac drift requires prolonged exercise. The 90-minute floor is the practical field threshold where drift becomes detectable. The VI ≤ 1.05 filter excludes interval sessions where decoupling reflects recovery dynamics, not aerobic drift. Negative decoupling values are included — they indicate HR drifted down relative to power (strong durability or cooling conditions).
+
+**Aggregate Metrics:**
+
+| **Metric**               | **Description**                                           | **Minimum Data** |
+|--------------------------|-----------------------------------------------------------|-------------------|
+| mean_decoupling_7d       | Mean decoupling from qualifying sessions in last 7 days   | ≥ 2 sessions      |
+| mean_decoupling_28d      | Mean decoupling from qualifying sessions in last 28 days  | ≥ 2 sessions      |
+| high_drift_count_7d/28d  | Count of qualifying sessions with decoupling > 5%         | —                 |
+| trend                    | 7d vs 28d comparison: improving / stable / declining      | Both windows      |
+
+**Trend Logic:**
+- `improving`: 7d mean < 28d mean by > 1 percentage point
+- `stable`: 7d and 28d means within ±1 percentage point
+- `declining`: 7d mean > 28d mean by > 1 percentage point
+
+Trend direction matters more than absolute values — an athlete's baseline decoupling varies with fitness, conditions, and terrain.
+
+**Alert Thresholds:**
+
+| Condition                          | Severity | Action                                            |
+|------------------------------------|----------|---------------------------------------------------|
+| 28d mean > 5% (sustained)         | alarm    | Aerobic efficiency concern — review volume/recovery |
+| 7d mean > 28d mean by > 2%        | warning  | Durability declining — check fatigue and recovery   |
+| ≥ 3 sessions with > 5% in 7d      | warning  | Repeated poor durability — investigate root cause   |
+
+**Relationship to Existing Metrics:**
+
+| Metric                   | Relationship                                                                                    |
+|--------------------------|-------------------------------------------------------------------------------------------------|
+| Durability Index (DI)    | **Complementary.** DI measures power output sustainability. Aggregate Durability measures cardiac efficiency trend. |
+| HR–Power Decoupling      | **Aggregates.** Per-session decoupling is the raw input; aggregate durability provides the trend view.              |
+| Endurance Decay          | **Different signal.** Endurance Decay = muscular. Aggregate Durability = cardiovascular drift.                     |
+
 ---
 
 #### W′ Balance Metrics *(When Interval Data Available)*
@@ -996,6 +1104,10 @@ To ensure AI systems evaluate metrics in the correct order:
 | Grey Zone Percentage         | Polarisation Index        | **Complementary.** Polarisation Index validates 80/20 by easy time. Grey Zone Percentage specifically flags grey zone creep.         |
 | Quality Intensity Percentage | Polarisation Index        | **Complementary.** Quality Intensity Percentage tracks quality intensity. For high-volume athletes, Hard Days per Week is preferred. |
 | Stress Tolerance             | Strain                    | **Derived from.** Stress Tolerance = (Strain ÷ Monotony) ÷ 100, providing absorption capacity context.                               |
+| Aggregate Durability         | HR–Power Decoupling       | **Aggregates.** Per-session decoupling is the raw input; aggregate durability provides the 7d/28d trend view.                        |
+| Aggregate Durability         | Durability Index (DI)     | **Complementary.** DI = power output sustainability. Aggregate Durability = cardiovascular efficiency trend across sessions.          |
+| Seiler TID (Treff PI)        | Polarisation Index        | **Different scale.** Simple Polarisation Index = 0–1 easy-time ratio. Treff PI = logarithmic scale with 5-class classification.      |
+| TID Drift                    | Seiler TID                | **Temporal comparison.** TID Drift compares 7d vs 28d Seiler TID to detect distribution shifts over time.                            |
 
 ---
 
@@ -1010,9 +1122,9 @@ When new inputs are provided (e.g., FTP test, updated HRV, weight), the AI must 
 
 ### Feedback Loop Architecture *(RPS-Style)*
 
-- **Weekly loop** → Review CTL, ATL, TSB, DI, HRV, RHR; adjust load accordingly.  
+- **Weekly loop** → Review CTL, ATL, TSB, DI, HRV, RHR, aggregate durability trend, TID drift; adjust load accordingly.  
 - **Feed-forward** → AI or athlete modifies next week’s volume/intensity based on readiness.  
-- **Block loop (3–4 weeks)** → Evaluate durability and readiness; determine phase transitions.
+- **Block loop (3–4 weeks)** → Evaluate durability trend (by-week trajectory), TID at block scale, readiness; determine phase transitions.
 
 > Training progression must reflect **physiological adaptation**, not fixed calendar timing.
 
@@ -1049,6 +1161,7 @@ See https://github.com/CrankAddict/section-11/tree/main/examples/reports for ann
 - Weather and coach note (if athlete location is available)
 - Readiness assessment (HRV, RHR, Sleep vs baselines)
 - Load context (TSB, ACWR, Load/Recovery, Monotony if > 2.3)
+- Capability snapshot (Durability 7d mean + trend; TID drift if not consistent)
 - Today's planned workout with duration and targets (or rest day + next session preview)
 - Go/Modify/Skip recommendation with rationale
 
@@ -1058,7 +1171,7 @@ See `PRE_WORKOUT_TEMPLATE.md` in the examples directory for conditional fields a
 - One-line session summary
 - Completed session metrics (power, HR, zones, decoupling, VI, TSS vs planned)
 - Plan compliance assessment
-- Weekly running totals (polarization, CTL, ATL, TSB, ACWR, hours, TSS)
+- Weekly running totals (polarization, durability 7d/28d + trend, TID 28d + drift, CTL, ATL, TSB, ACWR, hours, TSS)
 - Overall coach note (2-4 sentences: compliance, key quality observations, load context, recovery note)
 
 See `POST_WORKOUT_TEMPLATE.md` in the examples directory for field reference and rounding conventions.
@@ -1175,7 +1288,7 @@ This subsection defines the formal self-validation and audit metadata structure 
   "validation_metadata": {
     "data_source_fetched": true,
     "json_fetch_status": "success",
-    "protocol_version": "11.3",
+    "protocol_version": "11.5",
     "checklist_passed": [1, 2, 3, 4, 5, 6, "6b", 7, 8, 9, 10],
     "checklist_failed": [],
     "data_timestamp": "2026-01-13T22:32:05Z",
@@ -1204,7 +1317,13 @@ This subsection defines the formal self-validation and audit metadata structure 
     "benchmark_index": 0.03,
     "benchmark_seasonal_expected": true,
     "w_prime_data_available": true,
-    "w_prime_confidence": "high"
+    "w_prime_confidence": "high",
+    "seiler_tid_7d": "Polarized",
+    "seiler_tid_28d": "Polarized",
+    "tid_drift": "consistent",
+    "durability_7d_mean": 2.1,
+    "durability_28d_mean": 2.5,
+    "durability_trend": "stable"
   }
 }
 ```
@@ -1245,6 +1364,12 @@ This subsection defines the formal self-validation and audit metadata structure 
 | `benchmark_seasonal_expected`  | boolean  | Whether current Benchmark Index is within seasonal expectations                     |
 | `w_prime_data_available`       | boolean  | Whether CP/W′ data is available                                                     |
 | `w_prime_confidence`           | string   | Confidence level of W′ estimates ("high" / "medium" / "low" / "unavailable")        |
+| `seiler_tid_7d`                | string   | Seiler TID classification for 7-day window (Polarized/Pyramidal/Threshold/etc.) |
+| `seiler_tid_28d`               | string   | Seiler TID classification for 28-day window                                     |
+| `tid_drift`                    | string   | TID drift category: "consistent" / "shifting" / "acute_depolarization"          |
+| `durability_7d_mean`           | number   | Mean HR–Power decoupling (%) from qualifying steady-state sessions, 7-day       |
+| `durability_28d_mean`          | number   | Mean HR–Power decoupling (%) from qualifying steady-state sessions, 28-day      |
+| `durability_trend`             | string   | Durability trend: "improving" / "stable" / "declining"                          |
 
 ---
 
@@ -1282,14 +1407,6 @@ This protocol ensures that any AI engaging with athlete data provides structured
 **If uncertain — ask, confirm, and adapt rather than infer.**
 
 This ensures numerical integrity, auditability, and consistent long-term performance alignment with athlete objectives.
-
-### Alignment Note
-
-This AI integration protocol aligns with:
-- Intervals.icu GPT Coaching Framework v17
-- URF v5.1
-
-It preserves deterministic reasoning, reproducible metrics, and transparent auditability — ensuring all AI-based coaching adheres to the same data integrity and endurance science principles.
 
 > This protocol draws on concepts from the **Intervals.icu GPT Coaching Framework** (Clive King, revo2wheels) and the **Unified Reporting Framework v5.1**, with particular reference to stress tolerance, zone distribution indexing, and tiered audit validation approaches. Special thanks to **David Tinker** (Intervals.icu) and **Clive King** for their foundational work enabling open endurance data access and AI coaching integration.
 
