@@ -20,10 +20,10 @@
 - Fixed changelog severity terminology: "flag/alarm" → "warning/alarm" to match implementation
 - Clarified relationship between simple Polarisation Index and Treff Polarization Index
 
-**v11.4** — Graduated alerts, history.json, confidence scoring, monotony deload context
-**v11.3** — Output format guidelines, report templates, communication style
-**v11.2** — Phase detection, load management hierarchy, zone distribution, durability sub-metrics, W′ balance
-**v11.1** — Reordered 11B/11C for logical flow
+**v11.4** — Graduated alerts, history.json, confidence scoring, monotony deload context  
+**v11.3** — Output format guidelines, report templates, communication style  
+**v11.2** — Phase detection, load management hierarchy, zone distribution, durability sub-metrics, W′ balance  
+**v11.1** — Reordered 11B/11C for logical flow  
 **v11.0** — Foundation: modular split (11A/11B/11C), unified terminology
 
 ---
