@@ -179,6 +179,8 @@ Connect your GitHub account via the ChatGPT GitHub connector at [chatgpt.com/cod
 
 After configuration, test with:
 
+### Post-Workout Test
+
 > "How was today's workout?"
 
 **Good response includes:**
@@ -195,6 +197,22 @@ After configuration, test with:
 - ❌ Missing session fields
 - ❌ "(GitHub)" citations throughout
 - ❌ "Your TSB is -23, consider recovery" (when no other triggers present)
+
+### Pre-Workout Test
+
+> "Good morning, what's my workout today?"
+
+**Good response includes:**
+- ✅ Readiness assessment (HRV, RHR, Sleep vs 7d/28d baselines)
+- ✅ Load context (TSB, ACWR, Monotony if > 2.0)
+- ✅ Capability snapshot (durability 7d + trend, TID drift if not consistent)
+- ✅ Today's planned workout details from planned_workouts
+- ✅ Go / Modify / Skip recommendation with reasoning
+
+**Bad response:**
+- ❌ Skipping readiness check and jumping straight to workout description
+- ❌ Missing capability snapshot (durability, TID drift)
+- ❌ Generic "listen to your body" without referencing actual metrics
 
 ---
 
@@ -459,8 +477,6 @@ This work is licensed under [CC BY-NC 4.0](https://creativecommons.org/licenses/
 - [x] Longitudinal history generation (tiered granularity)
 - [x] Upstream update notifications via GitHub Issues
 - [x] Capability metrics (aggregate durability, dual-timeframe TID)
-- [ ] CustomGPT implementation
-- [ ] MCP Server integration
 
 ---
 
