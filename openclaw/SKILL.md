@@ -1,6 +1,6 @@
 ---
 name: section-11
-description: Evidence-based endurance cycling coaching protocol (v11.4). Use when analyzing training data, reviewing sessions, generating pre/post-workout reports, planning workouts, answering training questions, or giving cycling coaching advice. Always fetch athlete JSON data before responding to any training question.
+description: Evidence-based endurance cycling coaching protocol (v11.5). Use when analyzing training data, reviewing sessions, generating pre/post-workout reports, planning workouts, answering training questions, or giving cycling coaching advice. Always fetch athlete JSON data before responding to any training question.
 ---
 
 # Section 11 — AI Coaching Protocol
@@ -38,7 +38,7 @@ Do not proceed with coaching until dossier, data source, and heartbeat config ar
 
 Fetch and follow: https://raw.githubusercontent.com/CrankAddict/section-11/main/SECTION_11.md
 
-**Current version:** 11.4
+**Current version:** 11.5
 
 ## Data Hierarchy
 1. JSON data (always fetch latest.json first, then history.json for longitudinal context)
