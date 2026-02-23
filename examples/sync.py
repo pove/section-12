@@ -4,31 +4,20 @@ Intervals.icu → GitHub/Local JSON Export
 Exports training data for LLM access.
 Supports both automated GitHub sync and manual local export.
 
-Version 3.4.0 - Aggregate Decoupling + Dual-Timeframe TID
-  - Durability trend: rolling 7d/28d mean decoupling from steady-state sessions
-  - Session filter: VI ≤ 1.05, VI > 0, ≥ 90min, power data required
-  - Dual-timeframe TID: 28d Seiler classification alongside existing 7d
-  - TID drift detection: consistent/shifting/acute_depolarization
-  - New 'capability' namespace in derived_metrics for capability-layer metrics
-  - Alert integration for durability declining/alarm and TID drift
+Version 3.5.0 - Race Calendar & Race-Week Protocol
+  - 90-day race calendar from Intervals.icu RACE_A/B/C event categories
+  - Three-layer race awareness: calendar (D-90), taper onset (D-14 to D-8), race week (D-7 to D-0)
+  - Race-week protocol: day-by-day load targets (% of CTL), zone guidance, purpose labels
+  - TSB projection for race day using PMC decay with zero assumed load
+  - Event duration classification (short/medium/long) from moving_time
+  - Carb loading triggers (≥90min events), opener scheduling (D-2), go/no-go checklist
+  - RACE_B lighter taper (50-65% budget vs 40-55% for RACE_A)
+  - Race-specific alerts integrated into main alerts array
 
-Version 3.3.4 - Seiler TID & Polarization Index
-  - Seiler 3-zone TID classification (Polarized/Pyramidal/Threshold/HIT/Base)
-  - Treff Polarization Index (PI) with proper edge-case handling
-  - Dual calculation: all-sport and primary-sport TID (like monotony)
-  - Correct 7→3 zone mapping: Seiler Z1=z1+z2, Z2=z3, Z3=z4+
-
-Version 3.3.0 - Alerts, History & Notifications
-  - Graduated alerts array with flag/alarm severity and persistence tracking
-  - Monotony deload context detection (suppresses false positives)
-  - Auto-generated history.json with tiered granularity (90d daily, 180d weekly, 1-3y monthly)
-  - History confidence scoring in latest.json output
-  - Upstream update notifications via GitHub Issues
-  - Smart fitness metrics: CTL/ATL/TSB/ramp_rate all use API values when today's
-    workouts are completed, decayed yesterday values when planned but not yet done
-  - Uses API data for eFTP, W', P-max, VO2max (from wellness endpoint)
-  - Tracks indoor and outdoor FTP separately for Benchmark Index
-  - Calculates ACWR, Monotony, Strain, Recovery Index locally
+Version 3.4.1 - KeyError fix, defensive .get(), anonymization improvements
+Version 3.4.0 - Aggregate durability (7d/28d decoupling), dual-timeframe TID, capability namespace
+Version 3.3.4 - Seiler TID classification, Treff PI, multi-sport TID, 7→3 zone mapping
+Version 3.3.0 - Graduated alerts, history.json, notifications, smart fitness metrics, ACWR/monotony/strain
 """
 
 import requests
@@ -53,7 +42,7 @@ class IntervalsSync:
     HISTORY_FILE = "history.json"
     UPSTREAM_REPO = "CrankAddict/section-11"
     CHANGELOG_FILE = "changelog.json"
-    VERSION = "3.4.1"
+    VERSION = "3.5.0"
 
     # Sport family mapping for per-sport monotony calculation
     # Multi-sport athletes get inflated total monotony when cross-training
@@ -371,15 +360,16 @@ class IntervalsSync:
         
         latest_wellness = wellness[-1] if wellness else {}
         
-        # Fetch planned workouts (EXTENDED: include past 7 days for Consistency Index)
-        print("Fetching planned workouts (past + future for Consistency Index)...")
+        # Fetch planned workouts (EXTENDED: include past 7 days for Consistency Index, 90 days ahead for race calendar)
+        print("Fetching planned workouts (past + future for Consistency Index + race calendar)...")
         oldest_events = (datetime.now() - timedelta(days=days_back - 1)).strftime("%Y-%m-%d")
-        newest_ahead = (datetime.now() + timedelta(days=21)).strftime("%Y-%m-%d")
+        newest_ahead = (datetime.now() + timedelta(days=90)).strftime("%Y-%m-%d")
         events = self._intervals_get("events", {"oldest": oldest_events, "newest": newest_ahead})
         
-        # Split events into past (for consistency) and future (for display)
+        # Split events into past (for consistency), near future (for planned workouts display), and all future (for race calendar)
         past_events = [e for e in events if e.get("start_date_local", "")[:10] <= today]
         future_events = [e for e in events if e.get("start_date_local", "")[:10] >= today]
+        near_future_events = [e for e in future_events if e.get("start_date_local", "")[:10] <= (datetime.now() + timedelta(days=21)).strftime("%Y-%m-%d")]
         
         # Smart fitness metrics: same logic for CTL, ATL, TSB, and ramp rate
         # API values include planned workouts → inflated if not yet completed
@@ -453,6 +443,35 @@ class IntervalsSync:
         else:
             print("  ✅ No alerts — green light")
         
+        # Build race calendar (v3.5.0)
+        print("Building race calendar...")
+        race_calendar = self._build_race_calendar(
+            future_events=future_events,
+            current_ctl=ctl,
+            current_atl=atl,
+            current_tsb=tsb,
+            activities_7d=activities_display,
+            today=today
+        )
+        
+        # Add race-specific alerts
+        race_alerts = self._generate_race_alerts(race_calendar)
+        if race_alerts:
+            alerts.extend(race_alerts)
+            print(f"  🏁 {len(race_alerts)} race alert(s) added")
+        
+        if race_calendar.get("race_week", {}).get("active"):
+            rw = race_calendar["race_week"]
+            print(f"  🏁 Race week ACTIVE: {rw['current_day']} of '{rw['event_name']}'")
+        elif race_calendar.get("taper_alert", {}).get("active"):
+            nr = race_calendar.get("next_race", {})
+            print(f"  🏁 Taper alert: '{nr.get('name', '?')}' in {nr.get('days_until', '?')} days")
+        elif race_calendar.get("next_race"):
+            nr = race_calendar["next_race"]
+            print(f"  🏁 Next race: '{nr.get('name', '?')}' in {nr.get('days_until', '?')} days")
+        else:
+            print("  🏁 No races in 90-day window")
+        
         # History confidence (v3.3.0)
         history_info = self._get_history_confidence()
         
@@ -508,8 +527,9 @@ class IntervalsSync:
             "derived_metrics": derived_metrics,
             "recent_activities": self._format_activities(activities_display, anonymize),
             "wellness_data": self._format_wellness(wellness),
-            "planned_workouts": self._format_events(future_events, anonymize),
-            "weekly_summary": self._compute_weekly_summary(activities_display, wellness)
+            "planned_workouts": self._format_events(near_future_events, anonymize),
+            "weekly_summary": self._compute_weekly_summary(activities_display, wellness),
+            "race_calendar": race_calendar
         }
         
         return data
@@ -2840,6 +2860,358 @@ class IntervalsSync:
             "planned_tss": evt.get("icu_training_load"),
             "duration_hours": round(evt.get("duration", 0) / 3600, 2)
         } for i, evt in enumerate(events)]
+    
+    def _build_race_calendar(self, future_events: List[Dict], current_ctl: float,
+                              current_atl: float, current_tsb: float,
+                              activities_7d: List[Dict], today: str) -> Dict:
+        """
+        Build race calendar with 3-layer awareness (v3.5.0).
+        
+        Layer 1: All races within 90-day window (always present)
+        Layer 2: Taper onset alerts when RACE_A is 8-14 days out
+        Layer 3: Race-week protocol when RACE_A/B is ≤7 days out
+        
+        References: Section 11A Race-Week Protocol
+        Scientific basis: Mujika & Padilla (2003), Bosquet et al. (2007), Altini (HRV)
+        """
+        
+        today_date = datetime.strptime(today, "%Y-%m-%d").date()
+        
+        # Filter to race events only
+        race_categories = {"RACE_A", "RACE_B", "RACE_C"}
+        race_events = []
+        for evt in future_events:
+            cat = evt.get("category", "")
+            if cat in race_categories:
+                start = evt.get("start_date_local", "")[:10]
+                if start:
+                    try:
+                        evt_date = datetime.strptime(start, "%Y-%m-%d").date()
+                        days_until = (evt_date - today_date).days
+                        if days_until >= 0:
+                            race_events.append({
+                                "name": evt.get("name", "Unnamed Race"),
+                                "date": start,
+                                "category": cat,
+                                "type": evt.get("type", "Unknown"),
+                                "days_until": days_until,
+                                "moving_time_seconds": evt.get("moving_time"),
+                                "distance_meters": evt.get("distance"),
+                                "_raw": evt  # Keep raw for race-week building
+                            })
+                    except ValueError:
+                        continue
+        
+        # Sort by date
+        race_events.sort(key=lambda x: x["days_until"])
+        
+        # Strip _raw from public output
+        all_races = [{k: v for k, v in r.items() if k != "_raw"} for r in race_events]
+        
+        # Next race (any priority)
+        next_race = all_races[0] if all_races else None
+        
+        # Taper alert: RACE_A within 8-14 days
+        taper_race = next((r for r in race_events if r["category"] == "RACE_A" and 8 <= r["days_until"] <= 14), None)
+        taper_alert = {"active": taper_race is not None}
+        if taper_race:
+            taper_alert["event_name"] = taper_race["name"]
+            taper_alert["event_date"] = taper_race["date"]
+            taper_alert["days_until"] = taper_race["days_until"]
+            taper_alert["message"] = (
+                f"RACE_A '{taper_race['name']}' in {taper_race['days_until']} days. "
+                f"Begin volume reduction (target 41-60% over 2 weeks). Maintain intensity. "
+                f"CTL should peak now or within the next few days."
+            )
+        
+        # Race-week: RACE_A or RACE_B within 7 days
+        # If both exist, prioritise RACE_A
+        race_week_candidates = [r for r in race_events if r["category"] in {"RACE_A", "RACE_B"} and r["days_until"] <= 7]
+        race_week_target = None
+        if race_week_candidates:
+            a_races = [r for r in race_week_candidates if r["category"] == "RACE_A"]
+            race_week_target = a_races[0] if a_races else race_week_candidates[0]
+        
+        race_week = {"active": False}
+        if race_week_target:
+            race_week = self._build_race_week(
+                race_event=race_week_target,
+                current_ctl=current_ctl,
+                current_atl=current_atl,
+                current_tsb=current_tsb,
+                activities_7d=activities_7d,
+                today_date=today_date
+            )
+        
+        return {
+            "next_race": next_race,
+            "all_races": all_races,
+            "taper_alert": taper_alert,
+            "race_week": race_week
+        }
+    
+    def _build_race_week(self, race_event: Dict, current_ctl: float,
+                          current_atl: float, current_tsb: float,
+                          activities_7d: List[Dict], today_date) -> Dict:
+        """
+        Build race-week protocol data for D-7 through D-0.
+        
+        All load targets are relative to CTL. Normal weekly TSS = CTL × 7.
+        Race-week TSS budget: 40-55% of normal weekly TSS (RACE_A) or 50-65% (RACE_B).
+        
+        TSB projection uses PMC decay: CTL_decay = e^(-1/42), ATL_decay = e^(-1/7).
+        Assumes zero training load for remaining days to project race-day TSB.
+        """
+        
+        evt_date = datetime.strptime(race_event["date"], "%Y-%m-%d").date()
+        days_until = race_event["days_until"]
+        category = race_event["category"]
+        moving_time = race_event.get("moving_time_seconds")
+        
+        # Current day label
+        current_day = f"D-{days_until}" if days_until > 0 else "D-0"
+        
+        # CTL baseline and normal weekly TSS
+        ctl_baseline = current_ctl if current_ctl else 0
+        normal_weekly_tss = round(ctl_baseline * 7, 1)
+        
+        # Race-week TSS budget (relative to category)
+        if category == "RACE_A":
+            budget_min_pct, budget_max_pct = 0.40, 0.55
+        else:  # RACE_B
+            budget_min_pct, budget_max_pct = 0.50, 0.65
+        
+        budget_min = round(normal_weekly_tss * budget_min_pct)
+        budget_max = round(normal_weekly_tss * budget_max_pct)
+        
+        # Race-week TSS spent: sum TSS from activities within race week window
+        race_week_start = evt_date - timedelta(days=7)
+        tss_spent = 0
+        for act in activities_7d:
+            act_date_str = act.get("start_date_local", "")[:10]
+            if act_date_str:
+                try:
+                    act_date = datetime.strptime(act_date_str, "%Y-%m-%d").date()
+                    if race_week_start <= act_date <= today_date:
+                        tss_spent += act.get("icu_training_load", 0) or 0
+                except ValueError:
+                    continue
+        tss_spent = round(tss_spent)
+        
+        # TSB projection for race day (assume zero load for remaining days)
+        ctl_decay = math.exp(-1/42)   # ~0.9765
+        atl_decay = math.exp(-1/7)    # ~0.8668
+        
+        proj_ctl = current_ctl if current_ctl else 0
+        proj_atl = current_atl if current_atl else 0
+        for _ in range(days_until):
+            proj_ctl *= ctl_decay
+            proj_atl *= atl_decay
+        projected_tsb = round(proj_ctl - proj_atl, 1)
+        
+        # Event duration classification
+        if moving_time is not None:
+            if moving_time < 5400:
+                duration_class = "short_intense"
+            elif moving_time <= 10800:
+                duration_class = "medium"
+            else:
+                duration_class = "long_endurance"
+        else:
+            # Default by category when not set
+            duration_class = "long_endurance" if category == "RACE_A" else "medium"
+        
+        # TSB target range by duration class
+        tsb_targets = {
+            "short_intense": {"min": 5, "max": 15},
+            "medium": {"min": 10, "max": 20},
+            "long_endurance": {"min": 10, "max": 25}
+        }
+        tsb_range = tsb_targets.get(duration_class, {"min": 10, "max": 25})
+        
+        # RACE_B: lower TSB target by 5
+        if category == "RACE_B":
+            tsb_range = {"min": max(0, tsb_range["min"] - 5), "max": tsb_range["max"] - 5}
+        
+        # Day-by-day decision tree
+        day_protocol = self._get_day_protocol(days_until, ctl_baseline, duration_class, category)
+        
+        # Carb loading
+        carb_applicable = False
+        if moving_time is not None:
+            carb_applicable = moving_time >= 5400
+        elif category == "RACE_A":
+            carb_applicable = True  # Default assumption for A races
+        
+        carb_active = carb_applicable and days_until <= 4
+        carb_start_date = (evt_date - timedelta(days=4)).strftime("%Y-%m-%d")
+        
+        # Opener day (D-2)
+        opener_date = (evt_date - timedelta(days=2)).strftime("%Y-%m-%d")
+        opener_intensity = "lighter" if duration_class == "long_endurance" else (
+            "more_intense" if duration_class == "short_intense" else "standard"
+        )
+        
+        # Go/no-go: TSB status
+        if projected_tsb >= tsb_range["min"]:
+            tsb_status = "green"
+            go_notes = []
+        elif projected_tsb >= tsb_range["min"] - 10:
+            tsb_status = "flag"
+            go_notes = [f"Projected race-day TSB {projected_tsb} is below target range {tsb_range['min']}-{tsb_range['max']}. Consider additional rest."]
+        else:
+            tsb_status = "flag"
+            go_notes = [f"Projected race-day TSB {projected_tsb} is significantly below target range {tsb_range['min']}-{tsb_range['max']}. Fatigue may impact performance."]
+        
+        return {
+            "active": True,
+            "event_name": race_event["name"],
+            "event_date": race_event["date"],
+            "event_category": category,
+            "event_type": race_event.get("type", "Unknown"),
+            "event_duration_class": duration_class,
+            "event_moving_time_seconds": moving_time,
+            "days_until_event": days_until,
+            "current_day": current_day,
+            "ctl_baseline": round(ctl_baseline, 1),
+            "normal_weekly_tss": normal_weekly_tss,
+            "race_week_tss_budget": {"min": budget_min, "max": budget_max},
+            "race_week_tss_spent": tss_spent,
+            "race_week_tss_remaining": {
+                "min": max(0, budget_min - tss_spent),
+                "max": max(0, budget_max - tss_spent)
+            },
+            "projected_race_day_tsb": projected_tsb,
+            "tsb_target_range": tsb_range,
+            "today": day_protocol,
+            "carb_loading": {
+                "applicable": carb_applicable,
+                "active": carb_active,
+                "starts": "D-4",
+                "start_date": carb_start_date,
+                "note": "10-12 g·kg⁻¹/day. No depletion phase needed." if carb_applicable else None
+            },
+            "opener": {
+                "day": "D-2",
+                "date": opener_date,
+                "intensity": opener_intensity
+            },
+            "go_no_go": {
+                "tsb_status": tsb_status,
+                "notes": go_notes
+            }
+        }
+    
+    def _get_day_protocol(self, days_until: int, ctl: float, duration_class: str, category: str) -> Dict:
+        """
+        Return today's race-week protocol based on days until event.
+        Load targets as TSS = percentage of CTL.
+        """
+        # Day protocol definitions: (label, min_pct, max_pct, zones, purpose)
+        protocols = {
+            7: ("Last key session", 0.75, 1.00, "3-5 efforts Z4-Z5 (1-3 min)", "Fitness confirmation. Verify strong power/HR response."),
+            6: ("Recovery", 0.00, 0.30, "Z1-Z2 only", "Active recovery."),
+            5: ("Moderate endurance", 0.40, 0.60, "Z1-Z2 + 2-3 race-pace touches", "Maintain feel without adding fatigue."),
+            4: ("Easy / rest", 0.00, 0.40, "Z1-Z2 only", "Volume reduction. Carb loading begins if applicable."),
+            3: ("Easy / rest", 0.00, 0.40, "Z1-Z2 only", "Taper tantrums expected (D-4 to D-2). Normal — not lost fitness."),
+            2: ("Opener", 0.30, 0.50, "3-5 efforts Z4-Z6 (20-60s), high cadence, full recovery", "Neuromuscular activation."),
+            1: ("Rest / minimal", 0.00, 0.20, "Z1 only if active", "Final rest, logistics, equipment check."),
+            0: ("Race day", 0.00, 0.00, "Race effort", "Go/no-go assessment. Execute race plan.")
+        }
+        
+        # Default for days > 7 (shouldn't happen in race week, but defensive)
+        if days_until > 7:
+            return {
+                "label": "Pre-race-week",
+                "load_target_tss": None,
+                "zones": "Normal training",
+                "purpose": "Race week protocol not yet active for this day."
+            }
+        
+        label, min_pct, max_pct, zones, purpose = protocols.get(days_until, protocols[0])
+        
+        # Adjust opener intensity by duration class
+        if days_until == 2:
+            if duration_class == "long_endurance":
+                zones = "3-4 efforts Z4 only (20-60s), moderate cadence, full recovery"
+                purpose = "Light neuromuscular activation. Preserve glycogen."
+            elif duration_class == "short_intense":
+                zones = "5-6 efforts Z4-Z6 (10-30s), high cadence, full recovery"
+                purpose = "Full neuromuscular activation for short, intense effort."
+        
+        # For long endurance events, prefer easy endurance over complete rest on D-4/D-3
+        if days_until in (3, 4) and duration_class == "long_endurance":
+            min_pct = 0.20  # Nudge minimum up — easy spin preferred over full rest
+            purpose = f"{purpose} Easy endurance preferred over complete rest for long events."
+        
+        min_tss = round(ctl * min_pct)
+        max_tss = round(ctl * max_pct)
+        
+        return {
+            "label": label,
+            "load_target_tss": {"min": min_tss, "max": max_tss},
+            "zones": zones,
+            "purpose": purpose
+        }
+    
+    def _generate_race_alerts(self, race_calendar: Dict) -> List[Dict]:
+        """Generate race-specific alerts for the alerts array."""
+        alerts = []
+        
+        # Taper onset alert
+        taper = race_calendar.get("taper_alert", {})
+        if taper.get("active"):
+            alerts.append({
+                "metric": "race_taper",
+                "value": taper.get("days_until"),
+                "severity": "info",
+                "threshold": "RACE_A within 8-14 days",
+                "context": taper.get("message", "Taper onset detected."),
+                "persistence_days": None,
+                "tier": 1
+            })
+        
+        # Race-week alerts
+        rw = race_calendar.get("race_week", {})
+        if rw.get("active"):
+            # Daily status alert
+            today_proto = rw.get("today", {})
+            load = today_proto.get("load_target_tss", {})
+            alerts.append({
+                "metric": "race_week",
+                "value": rw.get("days_until_event"),
+                "severity": "info",
+                "threshold": f"{rw.get('event_category')} within 7 days",
+                "context": (
+                    f"Race week {rw.get('current_day')} of '{rw.get('event_name')}'. "
+                    f"Today: {today_proto.get('label', '?')}, "
+                    f"{load.get('min', 0)}-{load.get('max', 0)} TSS. "
+                    f"{today_proto.get('zones', '')}"
+                ),
+                "persistence_days": None,
+                "tier": 1
+            })
+            
+            # TSB projection warning
+            projected = rw.get("projected_race_day_tsb")
+            tsb_range = rw.get("tsb_target_range", {})
+            if projected is not None and tsb_range:
+                if projected < tsb_range.get("min", 0):
+                    alerts.append({
+                        "metric": "race_week_tsb",
+                        "value": projected,
+                        "severity": "warning",
+                        "threshold": f"TSB target {tsb_range.get('min')}-{tsb_range.get('max')}",
+                        "context": (
+                            f"Projected race-day TSB {projected} is below target range "
+                            f"{tsb_range.get('min')}-{tsb_range.get('max')}. "
+                            f"Consider additional rest to reach target."
+                        ),
+                        "persistence_days": None,
+                        "tier": 1
+                    })
+        
+        return alerts
     
     def _compute_weekly_summary(self, activities: List[Dict], wellness: List[Dict]) -> Dict:
         """Compute weekly training summary from actual activity data"""
