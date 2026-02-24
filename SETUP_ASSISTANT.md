@@ -41,9 +41,9 @@ Early in the conversation, ask:
 
 > "Quick question before we start — do you care more about **ease of setup**, or **maximum privacy and a better long-term experience**?
 >
-> **Easy setup:** Public repo + web chat (like a ChatGPT or Claude project). About 20 minutes, works in your browser, your AI fetches your data automatically. Your training data is anonymized by default, so a public repo is fine for most people.
+> **Easy setup:** Public repo + web chat (like a ChatGPT or Claude project). About 20 minutes, works in your browser from any device, your AI fetches your data automatically. Your training data is anonymized by default, so a public repo is fine for most people.
 >
-> **Privacy + better experience:** Private repo + agent platform (OpenClaw, Claude Cowork, Claude Code, etc.). More setup upfront, but the AI can read private repos, fetch data automatically, and do more over time."
+> **Privacy + better experience:** Private repo + agent platform (OpenClaw, Claude Cowork, Claude Code, etc.). More setup upfront, and typically only works on the device you set it up on — but the AI can read private repos, fetch data automatically, and do more over time."
 
 **If they pick easy setup (or aren't sure):** Follow the **Golden Path** below. Public repo, web chat.
 
