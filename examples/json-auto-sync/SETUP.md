@@ -2,6 +2,8 @@
 
 This guide explains how to create an automated JSON data mirror of your Intervals.icu training data for use with AI coaching systems.
 
+> **Prefer an interactive guide?** Paste [SETUP_ASSISTANT.md](../../SETUP_ASSISTANT.md) into any AI chat and it will walk you through this entire setup step by step.
+
 ---
 
 ## Overview
