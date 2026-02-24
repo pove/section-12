@@ -6,6 +6,7 @@ Working implementations for Section 11 integrations.
 
 | Folder | Description | Status |
 |--------|-------------|--------|
+| [SETUP_ASSISTANT.md](../SETUP_ASSISTANT.md) | Interactive AI-guided setup — paste into any AI chat | ✅ Ready |
 | [json-auto-sync](json-auto-sync/) | Automated GitHub Actions sync (every 15 min) | ✅ Ready |
 | [json-manual](json-manual/) | Manual export from Mac/PC | ✅ Ready |
 | [reports](reports/) | Pre/post workout report templates | ✅ Ready |
