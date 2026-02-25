@@ -1,7 +1,6 @@
 # Section 11 — Workout Reference Library
 
 **Version:** 0.5.0  
-**Status:** Draft  
 **Companion to:** Section 11 B — AI Training Plan Protocol  
 **Last updated:** 2026-02-25
 
