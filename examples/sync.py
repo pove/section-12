@@ -4,6 +4,11 @@ Intervals.icu → GitHub/Local JSON Export
 Exports training data for LLM access.
 Supports both automated GitHub sync and manual local export.
 
+Version 3.5.1 - HRV Outlier Filter
+  - Add _is_valid_hrv() helper to filter sensor errors (10-250ms range)
+  - Applied to: baselines (7d/28d), Recovery Index, persistence counts, summaries
+  - Fixes false alarms from sensor glitches (e.g., 255ms Amazfit/Garmin errors)
+
 Version 3.5.0 - Race Calendar & Race-Week Protocol
   - 90-day race calendar from Intervals.icu RACE_A/B/C event categories
   - Three-layer race awareness: calendar (D-90), taper onset (D-14 to D-8), race week (D-7 to D-0)
@@ -42,7 +47,7 @@ class IntervalsSync:
     HISTORY_FILE = "history.json"
     UPSTREAM_REPO = "CrankAddict/section-11"
     CHANGELOG_FILE = "changelog.json"
-    VERSION = "3.5.0"
+    VERSION = "3.5.1"
 
     # Sport family mapping for per-sport monotony calculation
     # Multi-sport athletes get inflated total monotony when cross-training
@@ -632,14 +637,14 @@ class IntervalsSync:
         strain = round(tss_7d_total * monotony, 0) if monotony else None
         
         # === BASELINES (7-day and extended) ===
-        hrv_values_7d = [w.get("hrv") for w in wellness_7d if w.get("hrv")]
+        hrv_values_7d = [w.get("hrv") for w in wellness_7d if self._is_valid_hrv(w.get("hrv"))]
         rhr_values_7d = [w.get("restingHR") for w in wellness_7d if w.get("restingHR")]
         
         hrv_baseline_7d = round(statistics.mean(hrv_values_7d), 1) if hrv_values_7d else None
         rhr_baseline_7d = round(statistics.mean(rhr_values_7d), 1) if rhr_values_7d else None
         
         # Extended baselines (for more stable reference)
-        hrv_values_ext = [w.get("hrv") for w in wellness_extended if w.get("hrv")]
+        hrv_values_ext = [w.get("hrv") for w in wellness_extended if self._is_valid_hrv(w.get("hrv"))]
         rhr_values_ext = [w.get("restingHR") for w in wellness_extended if w.get("restingHR")]
         
         hrv_baseline_28d = round(statistics.mean(hrv_values_ext), 1) if hrv_values_ext else None
@@ -648,7 +653,8 @@ class IntervalsSync:
         # === RECOVERY INDEX (RI) ===
         # Formula: (HRV_today / HRV_baseline) ÷ (RHR_today / RHR_baseline)
         # Interpretation: >1.0 = good recovery, <1.0 = poor recovery
-        latest_hrv = wellness_7d[-1].get("hrv") if wellness_7d else None
+        latest_hrv_raw = wellness_7d[-1].get("hrv") if wellness_7d else None
+        latest_hrv = latest_hrv_raw if self._is_valid_hrv(latest_hrv_raw) else None
         latest_rhr = wellness_7d[-1].get("restingHR") if wellness_7d else None
         
         if latest_hrv and latest_rhr and hrv_baseline_7d and rhr_baseline_7d:
@@ -1851,14 +1857,22 @@ class IntervalsSync:
             return f"deload pattern detected (7-day TSS {round(tss_7d_total)} is {round(deficit_pct)}% below 28-day weekly avg {round(weekly_avg_28d)})"
         
         return None
-    
+
+    @staticmethod
+    def _is_valid_hrv(value: float) -> bool:
+        """
+        Check if HRV value is within valid physiological range (10-250ms RMSSD).
+        Filters sensor errors while preserving legitimate high values in elite athletes.
+        """
+        return value is not None and 10 <= value <= 250
+
     def _count_hrv_low_days(self, wellness_7d: List[Dict], baseline: float) -> int:
         """Count consecutive days (from most recent) where HRV is ↓>20% below baseline"""
         threshold = baseline * 0.8
         count = 0
         for w in reversed(wellness_7d):
             hrv = w.get("hrv")
-            if hrv is not None and hrv < threshold:
+            if self._is_valid_hrv(hrv) and hrv < threshold:
                 count += 1
             else:
                 break
@@ -2229,8 +2243,8 @@ class IntervalsSync:
                 week_tss += day_tss
                 week_seconds += day_seconds
                 week_activities += len(day_activities)
-                
-                if wellness.get("hrv"):
+
+                if self._is_valid_hrv(wellness.get("hrv")):
                     week_hrv.append(wellness["hrv"])
                 if wellness.get("restingHR"):
                     week_rhr.append(wellness["restingHR"])
@@ -2371,8 +2385,9 @@ class IntervalsSync:
                 month_tss += day_tss
                 month_seconds += day_seconds
                 month_activities += len(day_activities)
-                
-                if wellness.get("hrv"):
+
+
+                if self._is_valid_hrv(wellness.get("hrv")):
                     month_hrv.append(wellness["hrv"])
                 if wellness.get("restingHR"):
                     month_rhr.append(wellness["restingHR"])
@@ -3218,15 +3233,15 @@ class IntervalsSync:
         total_tss = sum(act.get("icu_training_load", 0) for act in activities if act.get("icu_training_load"))
         total_seconds = sum(act.get("moving_time", 0) for act in activities)
         total_hours = total_seconds / 3600
-        
+
         avg_hrv = None
         avg_rhr = None
         if wellness:
-            hrv_values = [w.get("hrv") for w in wellness if w.get("hrv")]
+            hrv_values = [w.get("hrv") for w in wellness if self._is_valid_hrv(w.get("hrv"))]
             rhr_values = [w.get("restingHR") for w in wellness if w.get("restingHR")]
             avg_hrv = round(sum(hrv_values) / len(hrv_values), 1) if hrv_values else None
             avg_rhr = round(sum(rhr_values) / len(rhr_values), 1) if rhr_values else None
-        
+
         return {
             "total_training_hours": round(total_hours, 2),
             "total_tss": round(total_tss, 0),
