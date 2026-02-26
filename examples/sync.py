@@ -308,12 +308,8 @@ class IntervalsSync:
         print("Fetching athlete data...")
         athlete = self._intervals_get("")
         
-        cycling_settings = None
-        if athlete.get("sportSettings"):
-            for sport in athlete["sportSettings"]:
-                if "Ride" in sport.get("types", []) or "VirtualRide" in sport.get("types", []):
-                    cycling_settings = sport
-                    break
+        # Extract per-sport-family thesholds from user settings
+        sport_settings = self._build_sport_thresholds(athlete)
         
         # Fetch extended activity range for ACWR
         print(f"Fetching activities (extended {days_for_acwr} days for ACWR)...")
@@ -403,9 +399,10 @@ class IntervalsSync:
         
         tsb = round(ctl - atl, 2) if (ctl is not None and atl is not None) else None
         
-        # Get both FTP values (user-set, not estimated)
-        current_ftp_indoor = cycling_settings.get("indoor_ftp") if cycling_settings else None
-        current_ftp_outdoor = cycling_settings.get("ftp") if cycling_settings else None
+        # Get both FTP values for cycling (user-set, not estimated)
+        cycling = sport_settings.get("cycling", {})
+        current_ftp_indoor = cycling.get("ftp_indoor")
+        current_ftp_outdoor = cycling.get("ftp")
         
         # Load and update FTP history (tracks both indoor and outdoor)
         print("Updating FTP history...")
@@ -517,15 +514,12 @@ class IntervalsSync:
                     "fitness_source": fitness_source
                 },
                 "thresholds": {
-                    "ftp_outdoor": current_ftp_outdoor,
-                    "ftp_indoor": current_ftp_indoor,
                     "eftp": power_model.get("eftp"),
-                    "lthr": cycling_settings.get("lthr") if cycling_settings else None,
-                    "max_hr": cycling_settings.get("max_hr") if cycling_settings else None,
                     "w_prime": power_model.get("w_prime"),
                     "w_prime_kj": power_model.get("w_prime_kj"),
                     "p_max": power_model.get("p_max"),
-                    "vo2max": vo2max
+                    "vo2max": vo2max,                    
+                    "sports": sport_settings
                 },
                 "current_metrics": {
                     "weight_kg": latest_wellness.get("weight") or athlete.get("icu_weight"),
@@ -544,6 +538,39 @@ class IntervalsSync:
         }
         
         return data
+
+    def _build_sport_thresholds(self, athlete: dict) -> dict:
+        """
+        Build per-sport-family threshold map from athlete sportSettings.
+        Returns a dict keyed by sport family (e.g. {"cycling": {...}, "run": {...}})
+        """
+        candidates: dict[str, tuple[dict, int]] = {}
+
+        for sport in athlete.get("sportSettings", []):
+            for sport_type in sport.get("types", []):
+                family = self.SPORT_FAMILIES.get(sport_type)
+                if not family:
+                    continue
+
+                raw_pace = sport.get("threshold_pace")
+                threshold_pace = raw_pace if (raw_pace is not None and raw_pace != 0) else None
+                pace_units = sport.get("pace_units") if threshold_pace is not None else None
+
+                entry = {
+                    "lthr": sport.get("lthr"),
+                    "max_hr": sport.get("max_hr"),
+                    "threshold_pace": threshold_pace,
+                    "pace_units": pace_units,
+                    "ftp": sport.get("ftp") or None,
+                    "ftp_indoor": sport.get("indoor_ftp") or None,
+                }
+
+                populated = sum(1 for v in entry.values() if v is not None)
+
+                if family not in candidates or populated > candidates[family][1]:
+                    candidates[family] = (entry, populated)
+
+        return {family: data for family, (data, _) in candidates.items()}
     
     def _calculate_derived_metrics(self, activities_7d: List[Dict], activities_28d: List[Dict],
                                     wellness_7d: List[Dict], wellness_extended: List[Dict],
